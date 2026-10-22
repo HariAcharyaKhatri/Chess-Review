@@ -9,6 +9,7 @@ interface GameTableProps {
   selectedGameIds: Set<string>;
   onToggleSelect: (id: string) => void;
   onSelectPreset: (mode: string) => void;
+  onAnalyseGame?: (game: GameMetadata) => void;
   className?: string;
 }
 
@@ -18,6 +19,7 @@ export const GameTable: React.FC<GameTableProps> = ({
   selectedGameIds,
   onToggleSelect,
   onSelectPreset,
+  onAnalyseGame,
   className = '',
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -227,13 +229,25 @@ export const GameTable: React.FC<GameTableProps> = ({
 
                     {/* Action */}
                     <td className="p-3 text-right">
-                      <Link
-                        to={`/review?gameId=${encodeURIComponent(game.id)}`}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors"
-                      >
-                        <Eye className="h-3.5 w-3.5" />
-                        <span>Review</span>
-                      </Link>
+                      <div className="inline-flex items-center gap-1.5 justify-end">
+                        {!analysis && onAnalyseGame && (
+                          <button
+                            type="button"
+                            onClick={() => onAnalyseGame(game)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 transition-colors"
+                            title="Start single-game analysis"
+                          >
+                            <span>Analyse</span>
+                          </button>
+                        )}
+                        <Link
+                          to={`/review?gameId=${encodeURIComponent(game.id)}`}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          <span>Review</span>
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 );

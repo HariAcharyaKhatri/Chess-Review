@@ -1,4 +1,4 @@
-import { GameMetadata, GameAnalysisResult, MoveAnalysis, MoveClassification } from '../types/chess';
+import { GameMetadata, GameAnalysisResult, MoveAnalysis, MoveClassification, EngineTelemetry } from '../types/chess';
 import { PgnParser } from '../chess/pgnParser';
 import { PositionService } from '../chess/positionService';
 import { engineClient } from '../engine/engineClient';
@@ -9,6 +9,8 @@ export interface AnalysisPipelineOptions {
   depth: number;
   movetimeMs?: number;
   onProgress?: (ply: number, totalPlies: number) => void;
+  onPositionStart?: (ply: number, totalPlies: number, san: string, turn: 'w' | 'b', fen: string) => void;
+  onTelemetry?: (telemetry: EngineTelemetry) => void;
   signal?: AbortSignal;
 }
 
@@ -20,7 +22,7 @@ export class ReviewPipeline {
     game: GameMetadata,
     options: AnalysisPipelineOptions
   ): Promise<GameAnalysisResult> {
-    const { depth, movetimeMs = 1500, onProgress, signal } = options;
+    const { depth, movetimeMs = 1500, onProgress, onPositionStart, onTelemetry, signal } = options;
 
     const parsed = PgnParser.parseGame(game.pgn, game.id);
     const moves = parsed.moves;
@@ -64,7 +66,12 @@ export class ReviewPipeline {
 
     const getEval = async (fen: string) => {
       if (evalCache.has(fen)) return evalCache.get(fen);
-      const res = await engineClient.evaluatePosition(fen, depth, movetimeMs, signal);
+      const res = await engineClient.evaluatePosition(fen, {
+        depth,
+        timeLimitMs: movetimeMs,
+        onTelemetry,
+        signal,
+      });
       evalCache.set(fen, res);
       return res;
     };
@@ -75,6 +82,8 @@ export class ReviewPipeline {
       }
 
       const move = moves[i];
+      onPositionStart?.(i + 1, moves.length, move.san, move.turn, move.fenBefore);
+
       const evalBefore = await getEval(move.fenBefore);
       const evalAfter = await getEval(move.fenAfter);
 
@@ -154,7 +163,7 @@ export class ReviewPipeline {
     return {
       gameId: game.id,
       analyzedAt: new Date().toISOString(),
-      engineVersion: 'Stockfish WASM 10.0.2',
+      engineVersion: engineClient.getVersion(),
       targetDepth: depth,
       whiteAccuracy: whiteMetrics.accuracy,
       blackAccuracy: blackMetrics.accuracy,

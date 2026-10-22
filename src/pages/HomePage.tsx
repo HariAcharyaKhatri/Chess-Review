@@ -13,6 +13,7 @@ import { ChessComImporter } from '../services/chessComImporter';
 import { LichessImporter } from '../services/lichessImporter';
 import { PgnParser } from '../chess/pgnParser';
 import { storageService } from '../storage/indexedDb';
+import { sessionManager } from '../analysis/sessionManager';
 import { GameMetadata } from '../types/chess';
 
 export const HomePage: React.FC = () => {
@@ -60,7 +61,19 @@ export const HomePage: React.FC = () => {
         }
         const games = parsedGames.map((p) => p.metadata);
         await storageService.saveGames(games);
-        navigate('/analysis?platform=pgn_upload');
+
+        if (games.length === 1) {
+          const settings = await storageService.getSettings();
+          const session = await sessionManager.createSession(
+            games,
+            settings,
+            `Review: ${games[0].white} vs ${games[0].black}`
+          );
+          sessionManager.startSession(session.id);
+          navigate(`/analysis/session/${encodeURIComponent(session.id)}`);
+        } else {
+          navigate('/analysis?platform=pgn_upload');
+        }
       }
     } catch (err: any) {
       setError(err.message || 'An error occurred during import');
@@ -84,7 +97,19 @@ export const HomePage: React.FC = () => {
         }
         const games = parsed.map((p) => p.metadata);
         await storageService.saveGames(games);
-        navigate('/analysis?platform=pgn_upload');
+
+        if (games.length === 1) {
+          const settings = await storageService.getSettings();
+          const session = await sessionManager.createSession(
+            games,
+            settings,
+            `Review: ${games[0].white} vs ${games[0].black}`
+          );
+          sessionManager.startSession(session.id);
+          navigate(`/analysis/session/${encodeURIComponent(session.id)}`);
+        } else {
+          navigate('/analysis?platform=pgn_upload');
+        }
       } catch (err: any) {
         setError('Failed to read PGN file: ' + err.message);
       }

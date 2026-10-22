@@ -3,6 +3,7 @@ import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Navbar } from './components/Navbar';
 import { HomePage } from './pages/HomePage';
 import { AnalysisPage } from './pages/AnalysisPage';
+import { SessionAnalysisPage } from './pages/SessionAnalysisPage';
 import { ReviewPage } from './pages/ReviewPage';
 import { PlayerPage } from './pages/PlayerPage';
 import { ComparePage } from './pages/ComparePage';
@@ -18,6 +19,7 @@ export const App: React.FC = () => {
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/analysis" element={<AnalysisPage />} />
+            <Route path="/analysis/session/:sessionId" element={<SessionAnalysisPage />} />
             <Route path="/review" element={<ReviewPage />} />
             <Route path="/player" element={<PlayerPage />} />
             <Route path="/compare" element={<ComparePage />} />

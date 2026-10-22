@@ -1,5 +1,5 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
-import { GameMetadata, GameAnalysisResult, EngineSettings, PlayerStats } from '../types/chess';
+import { GameMetadata, GameAnalysisResult, EngineSettings, PlayerStats, AnalysisSession, BenchmarkResult } from '../types/chess';
 
 export const DEFAULT_SETTINGS: EngineSettings = {
   preset: 'balanced',
@@ -31,10 +31,19 @@ interface ChessAppDB extends DBSchema {
     key: string;
     value: any;
   };
+  sessions: {
+    key: string;
+    value: AnalysisSession;
+    indexes: { 'by-date': string; 'by-status': string };
+  };
+  benchmarks: {
+    key: string;
+    value: BenchmarkResult;
+  };
 }
 
 const DB_NAME = 'chess_player_analytics_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 class StorageService {
   private dbPromise: Promise<IDBPDatabase<ChessAppDB>> | null = null;
@@ -42,7 +51,7 @@ class StorageService {
   private async getDB(): Promise<IDBPDatabase<ChessAppDB>> {
     if (!this.dbPromise) {
       this.dbPromise = openDB<ChessAppDB>(DB_NAME, DB_VERSION, {
-        upgrade(db) {
+        upgrade(db, oldVersion) {
           // Games Store
           if (!db.objectStoreNames.contains('games')) {
             const gameStore = db.createObjectStore('games', { keyPath: 'id' });
@@ -66,6 +75,19 @@ class StorageService {
           // Settings Store
           if (!db.objectStoreNames.contains('settings')) {
             db.createObjectStore('settings');
+          }
+
+          // Version 2 stores: Sessions & Benchmarks
+          if (oldVersion < 2) {
+            if (!db.objectStoreNames.contains('sessions')) {
+              const sessionStore = db.createObjectStore('sessions', { keyPath: 'id' });
+              sessionStore.createIndex('by-date', 'createdAt');
+              sessionStore.createIndex('by-status', 'status');
+            }
+
+            if (!db.objectStoreNames.contains('benchmarks')) {
+              db.createObjectStore('benchmarks', { keyPath: 'date' });
+            }
           }
         },
       });
@@ -122,6 +144,42 @@ class StorageService {
     return db.getAll('analysisResults');
   }
 
+  // --- Sessions CRUD ---
+
+  async saveSession(session: AnalysisSession): Promise<void> {
+    const db = await this.getDB();
+    await db.put('sessions', session);
+  }
+
+  async getSession(id: string): Promise<AnalysisSession | undefined> {
+    const db = await this.getDB();
+    return db.get('sessions', id);
+  }
+
+  async getAllSessions(): Promise<AnalysisSession[]> {
+    const db = await this.getDB();
+    return db.getAll('sessions');
+  }
+
+  async deleteSession(id: string): Promise<void> {
+    const db = await this.getDB();
+    await db.delete('sessions', id);
+  }
+
+  // --- Benchmarks CRUD ---
+
+  async saveBenchmark(benchmark: BenchmarkResult): Promise<void> {
+    const db = await this.getDB();
+    await db.put('benchmarks', benchmark);
+  }
+
+  async getLatestBenchmark(): Promise<BenchmarkResult | undefined> {
+    const db = await this.getDB();
+    const all = await db.getAll('benchmarks');
+    if (all.length === 0) return undefined;
+    return all.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+  }
+
   // --- Settings CRUD ---
 
   async getSettings(): Promise<EngineSettings> {
@@ -145,13 +203,15 @@ class StorageService {
   async exportAllData(): Promise<string> {
     const games = await this.getAllGames();
     const results = await this.getAllAnalysisResults();
+    const sessions = await this.getAllSessions();
     const settings = await this.getSettings();
 
     const data = {
-      version: 1,
+      version: 2,
       exportedAt: new Date().toISOString(),
       games,
       analysisResults: results,
+      sessions,
       settings,
     };
 
@@ -179,6 +239,15 @@ class StorageService {
       await tx.done;
     }
 
+    if (Array.isArray(data.sessions)) {
+      const db = await this.getDB();
+      const tx = db.transaction('sessions', 'readwrite');
+      for (const s of data.sessions) {
+        await tx.store.put(s);
+      }
+      await tx.done;
+    }
+
     return {
       gamesImported: data.games.length,
       resultsImported,
@@ -187,10 +256,12 @@ class StorageService {
 
   async clearAllData(): Promise<void> {
     const db = await this.getDB();
-    const tx = db.transaction(['games', 'analysisResults', 'playerProfiles'], 'readwrite');
+    const tx = db.transaction(['games', 'analysisResults', 'playerProfiles', 'sessions', 'benchmarks'], 'readwrite');
     await tx.objectStore('games').clear();
     await tx.objectStore('analysisResults').clear();
     await tx.objectStore('playerProfiles').clear();
+    await tx.objectStore('sessions').clear();
+    await tx.objectStore('benchmarks').clear();
     await tx.done;
   }
 }

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { GameMetadata, GameAnalysisResult, MoveAnalysis } from '../types/chess';
 import { storageService } from '../storage/indexedDb';
+import { sessionManager } from '../analysis/sessionManager';
 import { PgnParser } from '../chess/pgnParser';
 import { ChessBoard } from '../components/ChessBoard/ChessBoard';
 import { EvaluationBar } from '../components/EvaluationBar/EvaluationBar';
@@ -34,7 +35,15 @@ export const ReviewPage: React.FC = () => {
     setGames(loadedGames);
 
     const paramGameId = searchParams.get('gameId');
+    const paramSessionId = searchParams.get('sessionId');
+
     let targetGame = loadedGames.find((g) => g.id === paramGameId);
+    if (!targetGame && paramSessionId) {
+      const session = await storageService.getSession(paramSessionId);
+      if (session && session.games.length > 0) {
+        targetGame = session.games.find((g) => g.id === paramGameId) || session.games[0];
+      }
+    }
     if (!targetGame && loadedGames.length > 0) {
       targetGame = loadedGames[0];
     }
@@ -136,7 +145,17 @@ export const ReviewPage: React.FC = () => {
     );
   }
 
-  const totalPlies = analysisResult ? analysisResult.moves.length : activeGame.plyCount;
+  let totalPlies = 0;
+  if (analysisResult) {
+    totalPlies = analysisResult.moves.length;
+  } else if (activeGame) {
+    try {
+      const parsed = PgnParser.parseGame(activeGame.pgn);
+      totalPlies = parsed.moves.length;
+    } catch {
+      totalPlies = activeGame.plyCount || 0;
+    }
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
@@ -281,15 +300,28 @@ export const ReviewPage: React.FC = () => {
               />
             </div>
           ) : (
-            <div className="p-8 rounded-xl bg-slate-900 border border-slate-800 text-center space-y-2">
+            <div className="p-8 rounded-xl bg-slate-900 border border-slate-800 text-center space-y-3">
               <p className="text-sm font-semibold text-slate-300">
                 This game has not been analyzed yet.
               </p>
+              <p className="text-xs text-slate-400">
+                Run local Stockfish WASM to generate accurate evaluations, best moves, and player accuracy.
+              </p>
               <button
-                onClick={() => navigate('/analysis')}
-                className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold"
+                onClick={async () => {
+                  if (!activeGame) return;
+                  const settings = await storageService.getSettings();
+                  const session = await sessionManager.createSession(
+                    [activeGame],
+                    settings,
+                    `Review: ${activeGame.white} vs ${activeGame.black}`
+                  );
+                  sessionManager.startSession(session.id);
+                  navigate(`/analysis/session/${encodeURIComponent(session.id)}`);
+                }}
+                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
               >
-                Run Stockfish Analysis
+                Analyse Game with Stockfish
               </button>
             </div>
           )}

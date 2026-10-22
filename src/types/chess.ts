@@ -45,11 +45,33 @@ export interface EngineScore {
 export interface PositionEvaluation {
   score: EngineScore;
   depth: number;
+  seldepth?: number;
   bestMove: string; // UCI format e.g. "e2e4"
   bestMoveSan?: string;
   pv: string[]; // Principal variation UCI moves
+  pvSan?: string[];
   nodes?: number;
+  nps?: number;
   timeMs?: number;
+  currmove?: string;
+  currmovenumber?: number;
+  hashfull?: number;
+}
+
+export interface EngineTelemetry {
+  depth: number;
+  seldepth?: number;
+  score: EngineScore;
+  nodes: number;
+  nps: number;
+  timeMs: number;
+  pv: string[];
+  pvSan?: string[];
+  bestMove?: string;
+  currmove?: string;
+  currmovenumber?: number;
+  hashfull?: number;
+  rawScoreString: string;
 }
 
 export interface MoveAnalysis {
@@ -169,3 +191,54 @@ export interface ComparisonSample {
   whiteAccuracy: number;
   blackAccuracy: number;
 }
+
+export type SessionStatus = 'pending' | 'running' | 'paused' | 'stopped' | 'completed' | 'cancelled' | 'error';
+
+export interface AnalysisSession {
+  id: string;
+  title: string;
+  player?: string;
+  platform: ChessPlatform;
+  createdAt: string;
+  updatedAt: string;
+  status: SessionStatus;
+  settings: EngineSettings;
+  gameIds: string[];
+  games: GameMetadata[];
+  completedGameIds: string[];
+  currentGameIndex: number; // 0-based
+  currentPly: number;
+  totalPliesInCurrentGame: number;
+  currentMoveSan?: string;
+  currentTurn?: 'w' | 'b';
+  currentPositionFen?: string;
+  telemetry?: EngineTelemetry;
+  runningAverageAccuracy?: number;
+  completedResults: Record<string, GameAnalysisResult>;
+  gameAccuracies: Record<string, number>;
+  error?: string;
+  stopAfterCurrent?: boolean;
+}
+
+export interface DeviceCapabilities {
+  hardwareConcurrency: number;
+  deviceMemoryGb?: number;
+  isWasmSupported: boolean;
+  storageUsageBytes?: number;
+  storageQuotaBytes?: number;
+  measuredNps?: number;
+  recommendedPreset: EnginePreset;
+  recommendedDepth: number;
+}
+
+export interface BenchmarkResult {
+  date: string;
+  positionsAnalyzed: number;
+  totalNodes: number;
+  elapsedMs: number;
+  measuredNps: number;
+  depth: number;
+  deviceCores: number;
+  deviceMemoryGb?: number;
+}
+
