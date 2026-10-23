@@ -57,7 +57,7 @@ export const Navbar: React.FC = () => {
     { to: '/player', label: 'Player Stats', icon: BarChart3 },
     { to: '/compare', label: 'Compare', icon: Scale },
     { to: '/settings', label: 'Settings', icon: Settings },
-    { to: '/about', label: 'About', icon: Info },
+    { to: '/about', label: 'Guide & About', icon: Info },
   ];
 
   return (
