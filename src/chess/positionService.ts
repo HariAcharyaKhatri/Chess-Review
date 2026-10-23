@@ -147,6 +147,43 @@ export class PositionService {
   }
 
   /**
+   * Applies a SAN or UCI move to a FEN and returns the resulting FEN.
+   */
+  static applyMove(fen: string, sanOrUci: string): string | null {
+    try {
+      const chess = new Chess(fen);
+      let move = null;
+      if (sanOrUci.length >= 4 && /^[a-h][1-8][a-h][1-8]/.test(sanOrUci)) {
+        move = chess.move({
+          from: sanOrUci.substring(0, 2) as Square,
+          to: sanOrUci.substring(2, 4) as Square,
+          promotion: sanOrUci.length > 4 ? sanOrUci.substring(4, 5) : undefined,
+        });
+      } else {
+        move = chess.move(sanOrUci);
+      }
+      return move ? chess.fen() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Replays a list of SAN moves from starting position and returns the final FEN.
+   */
+  static getFenFromSanMoves(sanMoves: string[]): string {
+    const chess = new Chess();
+    for (const san of sanMoves) {
+      try {
+        chess.move(san);
+      } catch {
+        break;
+      }
+    }
+    return chess.fen();
+  }
+
+  /**
    * Checks if position is game over.
    */
   static getGameStatus(fen: string): { isOver: boolean; reason?: 'checkmate' | 'stalemate' | 'draw' | 'threefold' | 'insufficient_material' } {

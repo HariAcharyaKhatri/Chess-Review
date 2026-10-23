@@ -10,8 +10,62 @@ export interface EvaluateOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * Computes candidate URLs for the Stockfish worker script based on
+ * current window location, base URI, and Vite configuration.
+ */
+export function getWorkerCandidateUrls(
+  origin: string = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173',
+  pathname: string = typeof window !== 'undefined' ? window.location.pathname : '/',
+  baseUri?: string,
+  rawBase: string = import.meta.env.BASE_URL || './'
+): string[] {
+  const baseDir = pathname.replace(/[^/]*$/, ''); // keeps trailing slash
+
+  const candidates: string[] = [];
+
+  // Candidate 1: relative to current base directory (handles subpaths like /Chess-Review/)
+  try {
+    candidates.push(new URL('engines/stockfish.js', origin + baseDir).href);
+  } catch {}
+
+  // Candidate 2: first segment of path (standard GitHub Pages repo path: /<repo-name>/engines/stockfish.js)
+  const segments = pathname.split('/').filter(Boolean);
+  if (segments.length > 0 && !segments[0].includes('.')) {
+    try {
+      candidates.push(new URL(`/${segments[0]}/engines/stockfish.js`, origin).href);
+    } catch {}
+  }
+
+  // Candidate 3: root /engines/stockfish.js
+  try {
+    candidates.push(new URL('/engines/stockfish.js', origin).href);
+  } catch {}
+
+  // Candidate 4: baseUri if available
+  if (baseUri) {
+    try {
+      const docBaseDir = baseUri.split(/[?#]/)[0].replace(/[^/]*$/, '');
+      candidates.push(new URL('engines/stockfish.js', docBaseDir).href);
+    } catch {}
+  }
+
+  // Candidate 5: Vite BASE_URL if explicitly configured and not default './' or '/'
+  if (rawBase && rawBase !== './' && rawBase !== '/') {
+    try {
+      const cleanBase = rawBase.startsWith('/') ? rawBase : '/' + rawBase;
+      const finalBase = cleanBase.endsWith('/') ? cleanBase : cleanBase + '/';
+      candidates.push(new URL(`${finalBase}engines/stockfish.js`, origin).href);
+    } catch {}
+  }
+
+  return Array.from(new Set(candidates));
+}
+
 export class EngineClient {
   private worker: Worker | null = null;
+  private workerBlobUrl: string | null = null;
+  private resolvedWorkerUrl: string | null = null;
   private status: EngineStatus = 'uninitialized';
   private currentResolve: ((evalResult: PositionEvaluation) => void) | null = null;
   private currentReject: ((err: Error) => void) | null = null;
@@ -39,6 +93,82 @@ export class EngineClient {
     return this.engineVersionString;
   }
 
+  public getResolvedWorkerUrl(): string | null {
+    return this.resolvedWorkerUrl;
+  }
+
+  /**
+   * Discovers and instantiates the Stockfish Worker using candidate URL probing
+   * and Blob URL creation for 100% reliable cross-environment loading.
+   */
+  private async createWorker(): Promise<{ worker: Worker; workerUrl: string; blobUrl?: string }> {
+    if (typeof window === 'undefined' || typeof Worker === 'undefined') {
+      throw new Error('Web Workers are not available in this environment.');
+    }
+
+    const docBase = typeof document !== 'undefined' ? document.baseURI : undefined;
+    const uniqueCandidates = getWorkerCandidateUrls(
+      window.location.origin,
+      window.location.pathname,
+      docBase,
+      import.meta.env.BASE_URL
+    );
+
+    let lastProbeError = '';
+
+    // Probe candidates with fetch to find the script and create a reliable Blob worker
+    for (const candidateUrl of uniqueCandidates) {
+      try {
+        const resp = await fetch(candidateUrl);
+        if (!resp.ok) {
+          lastProbeError = `HTTP ${resp.status} ${resp.statusText} from ${candidateUrl}`;
+          continue;
+        }
+
+        const contentType = resp.headers.get('content-type') || '';
+        if (contentType.includes('text/html')) {
+          lastProbeError = `Received text/html instead of javascript from ${candidateUrl}`;
+          continue;
+        }
+
+        const scriptText = await resp.text();
+        if (
+          !scriptText.includes('uci_command') &&
+          !scriptText.includes('Stockfish') &&
+          !scriptText.includes('Module')
+        ) {
+          lastProbeError = `File at ${candidateUrl} did not match expected Stockfish engine signature`;
+          continue;
+        }
+
+        // Script content validated! Create Blob worker for optimal cross-origin / path resilience
+        try {
+          const blob = new Blob([scriptText], { type: 'application/javascript' });
+          const blobUrl = URL.createObjectURL(blob);
+          const worker = new Worker(blobUrl);
+          return { worker, workerUrl: candidateUrl, blobUrl };
+        } catch (blobErr) {
+          console.warn('Blob worker creation failed, falling back to direct URL worker:', blobErr);
+          const worker = new Worker(candidateUrl);
+          return { worker, workerUrl: candidateUrl };
+        }
+      } catch (fetchErr: any) {
+        lastProbeError = `Fetch failed for ${candidateUrl}: ${fetchErr?.message || fetchErr}`;
+      }
+    }
+
+    // Direct fallback if all fetch requests failed (e.g. strict CORS or offline with cached assets)
+    const fallbackUrl = uniqueCandidates[0] || new URL('engines/stockfish.js', window.location.href).href;
+    try {
+      const worker = new Worker(fallbackUrl);
+      return { worker, workerUrl: fallbackUrl };
+    } catch (directErr: any) {
+      throw new Error(
+        `Failed to initialize Stockfish worker. Probed: ${uniqueCandidates.join(', ')}. Details: ${lastProbeError || directErr?.message || directErr}`
+      );
+    }
+  }
+
   /**
    * Initializes the Stockfish Web Worker and executes the UCI handshake.
    */
@@ -46,35 +176,38 @@ export class EngineClient {
     if (this.status === 'ready') return;
     if (this.initPromise) return this.initPromise;
 
-    this.initPromise = new Promise<void>((resolve, reject) => {
+    this.initPromise = (async () => {
       this.status = 'initializing';
       this.lastError = null;
 
-      if (typeof window === 'undefined' || typeof Worker === 'undefined') {
-        const msg = 'Web Workers are not available in this environment.';
-        this.status = 'error';
-        this.lastError = msg;
-        reject(new Error(msg));
-        return;
-      }
+      let workerRef: Worker | null = null;
+      let targetUrl = '';
 
       try {
-        const origin = window.location.origin;
-        let basePath = import.meta.env.BASE_URL || '/';
-        if (basePath === './') basePath = '/';
-        if (!basePath.startsWith('/')) basePath = '/' + basePath;
-        if (!basePath.endsWith('/')) basePath = basePath + '/';
+        const { worker, workerUrl, blobUrl } = await this.createWorker();
+        workerRef = worker;
+        this.worker = worker;
+        this.resolvedWorkerUrl = workerUrl;
+        targetUrl = workerUrl;
+        if (blobUrl) {
+          this.workerBlobUrl = blobUrl;
+        }
+      } catch (err: any) {
+        const msg = err.message || `Failed to create Stockfish Worker: ${err}`;
+        this.status = 'error';
+        this.lastError = msg;
+        this.initPromise = null;
+        throw new Error(msg);
+      }
 
-        // Load the battle-tested Stockfish engine worker script
-        const workerUrl = new URL(`${basePath}engines/stockfish.js`, origin).href;
-
-        this.worker = new Worker(workerUrl);
-
+      await new Promise<void>((resolve, reject) => {
         let uciOkReceived = false;
 
         const timeout = setTimeout(() => {
           if (!uciOkReceived) {
-            const err = new Error('Stockfish engine initialization timed out. Failed to receive uciok.');
+            const err = new Error(
+              `Stockfish engine initialization timed out. Failed to receive uciok from ${targetUrl}`
+            );
             this.status = 'error';
             this.lastError = err.message;
             this.initPromise = null;
@@ -83,7 +216,7 @@ export class EngineClient {
           }
         }, 10000);
 
-        this.worker.onmessage = (e: MessageEvent) => {
+        workerRef!.onmessage = (e: MessageEvent) => {
           const line = typeof e.data === 'string' ? e.data.trim() : '';
 
           if (line.startsWith('id name ')) {
@@ -107,10 +240,11 @@ export class EngineClient {
           }
         };
 
-        this.worker.onerror = (err) => {
+        workerRef!.onerror = (err: ErrorEvent) => {
           clearTimeout(timeout);
           console.error('[ENGINE ONERROR]', err);
-          const msg = `Stockfish Worker encountered an error: ${err.message || 'Worker script failed to load'}`;
+          const detail = err.message ? `: ${err.message}` : '';
+          const msg = `Stockfish Worker encountered an error${detail} (loaded from ${targetUrl})`;
           console.error(msg, err);
           this.status = 'error';
           this.lastError = msg;
@@ -121,19 +255,14 @@ export class EngineClient {
             this.currentResolve = null;
             rejectFn(new Error(msg));
           }
+          this.destroy();
           reject(new Error(msg));
         };
 
         // Send initial UCI handshake
-        this.worker.postMessage('uci');
-      } catch (err: any) {
-        const msg = `Failed to create Stockfish Worker: ${err.message || err}`;
-        this.status = 'error';
-        this.lastError = msg;
-        this.initPromise = null;
-        reject(new Error(msg));
-      }
-    });
+        workerRef!.postMessage('uci');
+      });
+    })();
 
     return this.initPromise;
   }
@@ -189,10 +318,25 @@ export class EngineClient {
   /**
    * Waits for the engine to confirm it is idle and ready for the next task.
    */
-  public async waitUntilReady(): Promise<void> {
-    if (!this.worker) return;
+  public async waitUntilReady(timeoutMs: number = 3000): Promise<void> {
+    if (!this.worker || this.status === 'error') return;
     return new Promise<void>((resolve) => {
-      this.readyResolve = resolve;
+      let resolved = false;
+      const timer = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          this.readyResolve = null;
+          resolve();
+        }
+      }, timeoutMs);
+
+      this.readyResolve = () => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          resolve();
+        }
+      };
       this.worker?.postMessage('isready');
     });
   }
@@ -270,11 +414,17 @@ export class EngineClient {
       this.worker?.postMessage(`position fen ${fen}`);
       this.worker?.postMessage(`go depth ${depth} movetime ${timeLimitMs}`);
 
-      // Clear timer on complete
+      // Clear timer on complete or reject
       const origResolve = this.currentResolve;
       this.currentResolve = (result) => {
         clearTimeout(timer);
         origResolve?.(result);
+      };
+
+      const origReject = this.currentReject;
+      this.currentReject = (err) => {
+        clearTimeout(timer);
+        origReject?.(err);
       };
     });
   }
@@ -340,7 +490,7 @@ export class EngineClient {
   }
 
   /**
-   * Destroys worker instance.
+   * Destroys worker instance and releases allocated blob resources.
    */
   public destroy(): void {
     if (this.worker) {
@@ -351,15 +501,25 @@ export class EngineClient {
       }
       this.worker.terminate();
       this.worker = null;
-      this.status = 'uninitialized';
-      this.initPromise = null;
-      this.isEvaluating = false;
-      this.currentResolve = null;
-      this.currentReject = null;
-      this.currentTelemetryCallback = null;
     }
+    if (this.workerBlobUrl) {
+      try {
+        URL.revokeObjectURL(this.workerBlobUrl);
+      } catch {}
+      this.workerBlobUrl = null;
+    }
+    this.status = 'uninitialized';
+    this.initPromise = null;
+    this.isEvaluating = false;
+    this.currentResolve = null;
+    this.currentReject = null;
+    this.currentTelemetryCallback = null;
   }
 }
 
 // Export singleton instance for reuse across pages
 export const engineClient = new EngineClient();
+
+if (typeof window !== 'undefined') {
+  (window as any).engineClient = engineClient;
+}

@@ -11,7 +11,12 @@ import { AnalysisGraph } from '../components/AnalysisGraph/AnalysisGraph';
 import { AccuracyCard } from '../components/AccuracyCard/AccuracyCard';
 import { ReviewSummary } from '../components/ReviewSummary/ReviewSummary';
 import { AnalysisControls } from '../components/AnalysisControls/AnalysisControls';
-import { Download, FileJson, ArrowLeft, Swords } from 'lucide-react';
+import { OpeningCoachModal } from '../components/OpeningCoach/OpeningCoachModal';
+import { MistakeTrainerModal } from '../components/MistakeTrainer/MistakeTrainerModal';
+import { ImprovementPlanModal } from '../components/ImprovementPlan/ImprovementPlanModal';
+import { analyzeOpening, OpeningAnalysisResult } from '../chess/openings';
+import { ImprovementService, PersonalizedImprovementPlan } from '../services/improvementService';
+import { Download, FileJson, ArrowLeft, Swords, BookOpen, Target, Award, Layout, ListFilter } from 'lucide-react';
 
 export const ReviewPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -23,6 +28,18 @@ export const ReviewPage: React.FC = () => {
   const [currentPly, setCurrentPly] = useState(0);
   const [orientation, setOrientation] = useState<'white' | 'black'>('white');
   const [boardTheme, setBoardTheme] = useState<'green' | 'blue' | 'brown'>('green');
+
+  // Modals state
+  const [isOpeningCoachOpen, setIsOpeningCoachOpen] = useState(false);
+  const [isMistakeTrainerOpen, setIsMistakeTrainerOpen] = useState(false);
+  const [isImprovementPlanOpen, setIsImprovementPlanOpen] = useState(false);
+
+  // Derived analysis features
+  const [openingAnalysis, setOpeningAnalysis] = useState<OpeningAnalysisResult | undefined>();
+  const [improvementPlan, setImprovementPlan] = useState<PersonalizedImprovementPlan | undefined>();
+
+  // Mobile active tab view: 'board' | 'moves' | 'coach'
+  const [mobileTab, setMobileTab] = useState<'board' | 'moves' | 'coach'>('board');
 
   useEffect(() => {
     loadGamesAndSettings();
@@ -53,6 +70,27 @@ export const ReviewPage: React.FC = () => {
       const res = await storageService.getAnalysisResult(targetGame.id);
       setAnalysisResult(res || null);
       setCurrentPly(0);
+
+      // Re-orient board based on hero player
+      if (targetGame.black.toLowerCase().includes('hero')) {
+        setOrientation('black');
+      }
+
+      // Analyze openings
+      try {
+        const parsed = PgnParser.parseGame(targetGame.pgn);
+        const sanList = parsed.moves.map((m) => m.san);
+        const opRes = analyzeOpening(sanList);
+        setOpeningAnalysis(opRes);
+      } catch {
+        // ignore
+      }
+
+      // Generate personalized improvement plan if analysis exists
+      if (res) {
+        const plan = ImprovementService.generatePlan(targetGame, res);
+        setImprovementPlan(plan);
+      }
     }
   };
 
@@ -64,6 +102,23 @@ export const ReviewPage: React.FC = () => {
       const res = await storageService.getAnalysisResult(target.id);
       setAnalysisResult(res || null);
       setCurrentPly(0);
+
+      // Update opening analysis
+      try {
+        const parsed = PgnParser.parseGame(target.pgn);
+        const sanList = parsed.moves.map((m) => m.san);
+        const opRes = analyzeOpening(sanList);
+        setOpeningAnalysis(opRes);
+      } catch {
+        // ignore
+      }
+
+      if (res) {
+        const plan = ImprovementService.generatePlan(target, res);
+        setImprovementPlan(plan);
+      } else {
+        setImprovementPlan(undefined);
+      }
     }
   };
 
@@ -81,14 +136,12 @@ export const ReviewPage: React.FC = () => {
         from: activeMove.uci.substring(0, 2),
         to: activeMove.uci.substring(2, 4),
       };
-      // Next move suggestion or current position best move
       bestMove = activeMove.evalAfter.bestMove;
     } else if (currentPly === 0 && analysisResult.moves[0]) {
       currentFen = analysisResult.moves[0].fenBefore;
       bestMove = analysisResult.moves[0].evalBefore.bestMove;
     }
   } else if (activeGame) {
-    // If not yet analyzed, parse plies from PGN directly
     try {
       const parsed = PgnParser.parseGame(activeGame.pgn);
       if (currentPly > 0 && currentPly <= parsed.moves.length) {
@@ -97,7 +150,7 @@ export const ReviewPage: React.FC = () => {
         lastMove = { from: m.uci.substring(0, 2), to: m.uci.substring(2, 4) };
       }
     } catch {
-      // Keep default starting FEN
+      // keep starting position
     }
   }
 
@@ -117,6 +170,8 @@ export const ReviewPage: React.FC = () => {
     const data = {
       game: activeGame,
       analysis: analysisResult,
+      opening: openingAnalysis,
+      improvementPlan,
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -137,7 +192,7 @@ export const ReviewPage: React.FC = () => {
         </p>
         <button
           onClick={() => navigate('/analysis')}
-          className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm transition-colors"
+          className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm transition-colors cursor-pointer"
         >
           Go to Analysis
         </button>
@@ -164,7 +219,7 @@ export const ReviewPage: React.FC = () => {
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate('/analysis')}
-            className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition-colors"
+            className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
             title="Back to games list"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -175,13 +230,19 @@ export const ReviewPage: React.FC = () => {
               <span className="text-slate-500 font-normal">vs</span>
               <span>{activeGame.black}</span>
             </h1>
-            <p className="text-xs text-slate-400">
-              {activeGame.openingName || activeGame.eco || 'Chess Game'} • {activeGame.result} • {activeGame.date}
+            <p className="text-xs text-slate-400 flex items-center gap-2 mt-0.5">
+              <span>
+                {openingAnalysis?.opening.name || activeGame.openingName || activeGame.eco || 'Chess Game'}
+              </span>
+              <span>•</span>
+              <span className="font-bold text-slate-300">{activeGame.result}</span>
+              <span>•</span>
+              <span>{activeGame.date}</span>
             </p>
           </div>
         </div>
 
-        {/* Game switcher and export */}
+        {/* Action Controls & Navigation */}
         <div className="flex items-center gap-2 flex-wrap">
           {games.length > 1 && (
             <select
@@ -199,7 +260,7 @@ export const ReviewPage: React.FC = () => {
 
           <button
             onClick={handleExportPgn}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
             title="Download original PGN"
           >
             <Download className="h-3.5 w-3.5 text-emerald-400" />
@@ -209,7 +270,7 @@ export const ReviewPage: React.FC = () => {
           {analysisResult && (
             <button
               onClick={handleExportJson}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
               title="Download full analysis JSON"
             >
               <FileJson className="h-3.5 w-3.5 text-emerald-400" />
@@ -219,10 +280,88 @@ export const ReviewPage: React.FC = () => {
         </div>
       </div>
 
+      {/* AI Intelligence Toolbar: Opening Coach, Mistake Drill, Improvement Plan */}
+      {analysisResult && (
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/90 border border-slate-800 rounded-xl p-3 shadow-lg">
+          <div className="flex items-center gap-2 flex-wrap">
+            {openingAnalysis && (
+              <button
+                onClick={() => setIsOpeningCoachOpen(true)}
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-emerald-950/40 hover:bg-emerald-950/60 text-emerald-300 border border-emerald-500/30 text-xs font-semibold transition-all cursor-pointer"
+              >
+                <BookOpen className="h-4 w-4 text-emerald-400" />
+                <span>Opening Coach ({openingAnalysis.opening.eco})</span>
+              </button>
+            )}
+
+            {improvementPlan && improvementPlan.practicePositions.length > 0 && (
+              <button
+                onClick={() => setIsMistakeTrainerOpen(true)}
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-rose-950/40 hover:bg-rose-950/60 text-rose-300 border border-rose-500/30 text-xs font-semibold transition-all cursor-pointer"
+              >
+                <Target className="h-4 w-4 text-rose-400" />
+                <span>Drill Mistakes ({improvementPlan.practicePositions.length})</span>
+              </button>
+            )}
+
+            {improvementPlan && (
+              <button
+                onClick={() => setIsImprovementPlanOpen(true)}
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-amber-950/30 hover:bg-amber-950/50 text-amber-300 border border-amber-500/30 text-xs font-semibold transition-all cursor-pointer"
+              >
+                <Award className="h-4 w-4 text-amber-400" />
+                <span>Improvement Plan</span>
+              </button>
+            )}
+          </div>
+
+          {/* Quick accuracy badges */}
+          <div className="flex items-center gap-4 text-xs font-mono">
+            <div>
+              {activeGame.white}: <strong className="text-emerald-400">{analysisResult.whiteAccuracy}%</strong>
+            </div>
+            <div>
+              {activeGame.black}: <strong className="text-teal-400">{analysisResult.blackAccuracy}%</strong>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Tab Switcher (< lg screens) */}
+      <div className="flex lg:hidden bg-slate-900 border border-slate-800 rounded-xl p-1 text-xs font-semibold">
+        <button
+          onClick={() => setMobileTab('board')}
+          className={`flex-1 py-2 text-center rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+            mobileTab === 'board' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400'
+          }`}
+        >
+          <Layout className="h-3.5 w-3.5" />
+          <span>Board &amp; Review</span>
+        </button>
+        <button
+          onClick={() => setMobileTab('moves')}
+          className={`flex-1 py-2 text-center rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+            mobileTab === 'moves' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400'
+          }`}
+        >
+          <ListFilter className="h-3.5 w-3.5" />
+          <span>Moves &amp; Filters</span>
+        </button>
+        <button
+          onClick={() => setMobileTab('coach')}
+          className={`flex-1 py-2 text-center rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+            mobileTab === 'coach' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400'
+          }`}
+        >
+          <Target className="h-3.5 w-3.5" />
+          <span>Report &amp; Drills</span>
+        </button>
+      </div>
+
       {/* Main Review Workspace */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left: Eval Bar + Chessboard */}
-        <div className="lg:col-span-7 flex flex-col items-center gap-4">
+        {/* Left: Eval Bar + Chessboard + Controls + Graph */}
+        <div className={`lg:col-span-7 flex flex-col items-center gap-4 ${mobileTab !== 'board' ? 'hidden lg:flex' : ''}`}>
           <div className="w-full flex items-stretch justify-center gap-3">
             {/* Vertical Eval bar */}
             <div className="hidden sm:block">
@@ -264,6 +403,11 @@ export const ReviewPage: React.FC = () => {
             />
           </div>
 
+          {/* Tactical Explanation Box right below board on mobile */}
+          <div className="w-full max-w-[560px] lg:hidden">
+            <ReviewSummary game={activeGame} activeMove={activeMove} />
+          </div>
+
           {/* Advantage Graph */}
           {analysisResult && (
             <div className="w-full max-w-[560px]">
@@ -277,26 +421,33 @@ export const ReviewPage: React.FC = () => {
         </div>
 
         {/* Right: Review Details & Move List */}
-        <div className="lg:col-span-5 space-y-4">
-          {/* Active Move Explanation Box */}
-          <ReviewSummary game={activeGame} activeMove={activeMove} />
+        <div className={`lg:col-span-5 space-y-4 ${mobileTab === 'board' ? 'hidden lg:block' : ''}`}>
+          {/* Active Move Explanation Box (Desktop) */}
+          <div className="hidden lg:block">
+            <ReviewSummary game={activeGame} activeMove={activeMove} />
+          </div>
 
           {/* Accuracy Card */}
           {analysisResult && (
-            <AccuracyCard
-              result={analysisResult}
-              whitePlayer={activeGame.white}
-              blackPlayer={activeGame.black}
-            />
+            <div className={mobileTab === 'moves' ? 'hidden lg:block' : ''}>
+              <AccuracyCard
+                result={analysisResult}
+                whitePlayer={activeGame.white}
+                blackPlayer={activeGame.black}
+              />
+            </div>
           )}
 
-          {/* Move List */}
+          {/* Move List with Classification Filters */}
           {analysisResult ? (
-            <div className="h-[360px]">
+            <div className={`h-[420px] ${mobileTab === 'coach' ? 'hidden lg:block' : ''}`}>
               <MoveList
                 moves={analysisResult.moves}
                 currentPly={currentPly}
-                onSelectPly={(ply) => setCurrentPly(ply)}
+                onSelectPly={(ply) => {
+                  setCurrentPly(ply);
+                  if (mobileTab === 'moves') setMobileTab('board');
+                }}
               />
             </div>
           ) : (
@@ -325,8 +476,74 @@ export const ReviewPage: React.FC = () => {
               </button>
             </div>
           )}
+
+          {/* Mobile Training & Coaching Callout view */}
+          {mobileTab === 'coach' && improvementPlan && (
+            <div className="space-y-4 lg:hidden">
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Target className="h-4 w-4 text-rose-400" />
+                  <span>Mistake Replay Drills</span>
+                </h3>
+                <p className="text-xs text-slate-300">
+                  {improvementPlan.practicePositions.length} critical positions where significant mistakes were made.
+                </p>
+                <button
+                  onClick={() => setIsMistakeTrainerOpen(true)}
+                  className="w-full py-2.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition-colors cursor-pointer"
+                >
+                  Start Mistake Drill
+                </button>
+              </div>
+
+              {openingAnalysis && (
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <BookOpen className="h-4 w-4 text-emerald-400" />
+                    <span>Opening Theory Replay</span>
+                  </h3>
+                  <p className="text-xs text-slate-300">
+                    {openingAnalysis.opening.name} ({openingAnalysis.opening.eco})
+                  </p>
+                  <button
+                    onClick={() => setIsOpeningCoachOpen(true)}
+                    className="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-colors cursor-pointer"
+                  >
+                    Open Opening Coach
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Interactive Modals */}
+      <OpeningCoachModal
+        isOpen={isOpeningCoachOpen}
+        onClose={() => setIsOpeningCoachOpen(false)}
+        openingAnalysis={openingAnalysis}
+        theme={boardTheme}
+      />
+
+      {improvementPlan && (
+        <MistakeTrainerModal
+          isOpen={isMistakeTrainerOpen}
+          onClose={() => setIsMistakeTrainerOpen(false)}
+          positions={improvementPlan.practicePositions}
+          theme={boardTheme}
+        />
+      )}
+
+      {improvementPlan && (
+        <ImprovementPlanModal
+          isOpen={isImprovementPlanOpen}
+          onClose={() => setIsImprovementPlanOpen(false)}
+          plan={improvementPlan}
+          onLaunchMistakeTrainer={() => setIsMistakeTrainerOpen(true)}
+          onLaunchOpeningCoach={() => setIsOpeningCoachOpen(true)}
+        />
+      )}
     </div>
   );
 };

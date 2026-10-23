@@ -1,50 +1,165 @@
+import openingsList from './openingsData.json';
+
 export interface OpeningInfo {
   eco: string;
   name: string;
+  moves: string;
 }
 
-// Map common opening move sequences (first 2-4 plies) to ECO and opening name
-export const KNOWN_OPENINGS: Record<string, OpeningInfo> = {
-  'e4': { eco: 'B00', name: "King's Pawn Game" },
-  'e4 c5': { eco: 'B20', name: 'Sicilian Defense' },
-  'e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3 a6': { eco: 'B90', name: 'Sicilian Defense: Najdorf Variation' },
-  'e4 e5': { eco: 'C20', name: "Open Game (King's Pawn)" },
-  'e4 e5 Nf3 Nc6 Bb5': { eco: 'C60', name: 'Ruy Lopez' },
-  'e4 e5 Nf3 Nc6 Bc4': { eco: 'C50', name: 'Italian Game' },
-  'e4 e5 Nf3 Nc6 Bc4 Bc5': { eco: 'C53', name: 'Giuoco Piano' },
-  'e4 e5 Nf3 Nc6 Bc4 Nf6': { eco: 'C55', name: 'Two Knights Defense' },
-  'e4 e5 Nf3 Nc6 d4': { eco: 'C44', name: 'Scotch Game' },
-  'e4 e5 f4': { eco: 'C30', name: "King's Gambit" },
-  'e4 e6': { eco: 'C00', name: 'French Defense' },
-  'e4 c6': { eco: 'B10', name: 'Caro-Kann Defense' },
-  'e4 d6': { eco: 'B07', name: 'Pirc Defense' },
-  'e4 d5': { eco: 'B01', name: 'Scandinavian Defense' },
-  'e4 Nf6': { eco: 'B02', name: "Alekhine's Defense" },
-  'd4': { eco: 'A40', name: "Queen's Pawn Game" },
-  'd4 d5': { eco: 'D00', name: "Queen's Pawn Game: Closed" },
-  'd4 d5 c4': { eco: 'D06', name: "Queen's Gambit" },
-  'd4 d5 c4 e6': { eco: 'D30', name: "Queen's Gambit Declined" },
-  'd4 d5 c4 c6': { eco: 'D10', name: 'Slav Defense' },
-  'd4 d5 c4 dxc4': { eco: 'D20', name: "Queen's Gambit Accepted" },
-  'd4 Nf6': { eco: 'A45', name: 'Indian Defense' },
-  'd4 Nf6 c4 g6': { eco: 'E60', name: "King's Indian Defense" },
-  'd4 Nf6 c4 e6': { eco: 'E00', name: 'East Indian Defense' },
-  'd4 Nf6 c4 c5': { eco: 'A56', name: 'Benoni Defense' },
-  'd4 f5': { eco: 'A80', name: 'Dutch Defense' },
-  'c4': { eco: 'A10', name: 'English Opening' },
-  'Nf3': { eco: 'A04', name: 'Réti Opening' },
-  'g3': { eco: 'A00', name: 'Benko Opening' },
-  'b3': { eco: 'A01', name: 'Nimzo-Larsen Attack' },
-  'f4': { eco: 'A02', name: "Bird's Opening" },
-};
+export interface OpeningDeviation {
+  ply: number;
+  playedMove: string;
+  theoreticalMove: string;
+  continuation: string[];
+}
 
+export interface OpeningAnalysisResult {
+  opening: OpeningInfo;
+  matchedPlies: number;
+  totalTheoryPlies: number;
+  isInTheory: boolean;
+  deviation?: OpeningDeviation;
+  candidateContinuations: {
+    move: string;
+    openingName: string;
+    eco: string;
+  }[];
+}
+
+// Map for O(1) exact sequence lookup
+const openingsMap = new Map<string, OpeningInfo>();
+
+// Prefix map: prefix moves string -> list of full openings starting with this prefix
+const prefixMap = new Map<string, OpeningInfo[]>();
+
+for (const item of openingsList as OpeningInfo[]) {
+  openingsMap.set(item.moves, item);
+
+  const tokens = item.moves.split(' ');
+  // Index prefixes up to 10 moves
+  for (let i = 1; i < tokens.length && i <= 10; i++) {
+    const prefix = tokens.slice(0, i).join(' ');
+    let arr = prefixMap.get(prefix);
+    if (!arr) {
+      arr = [];
+      prefixMap.set(prefix, arr);
+    }
+    if (arr.length < 8) {
+      arr.push(item);
+    }
+  }
+}
+
+/**
+ * Looks up the most specific opening matching the played moves sequence.
+ * Uses longest matching prefix search.
+ */
 export function lookupOpening(movesSan: string[]): OpeningInfo | undefined {
-  // Try longest matching prefix first (up to 8 plies)
-  for (let len = Math.min(movesSan.length, 8); len >= 1; len--) {
+  if (!movesSan || movesSan.length === 0) return undefined;
+
+  for (let len = movesSan.length; len >= 1; len--) {
     const key = movesSan.slice(0, len).join(' ');
-    if (KNOWN_OPENINGS[key]) {
-      return KNOWN_OPENINGS[key];
+    const found = openingsMap.get(key);
+    if (found) {
+      return found;
     }
   }
   return undefined;
+}
+
+/**
+ * Performs deep opening analysis on a sequence of moves.
+ * Detects the identified opening, whether the position is still within theory,
+ * the exact deviation point (if any), and theoretical next moves.
+ */
+export function analyzeOpening(movesSan: string[]): OpeningAnalysisResult | undefined {
+  if (!movesSan || movesSan.length === 0) return undefined;
+
+  const opening = lookupOpening(movesSan);
+  if (!opening) return undefined;
+
+  const theoryMoves = opening.moves.split(' ');
+  const matchedPlies = theoryMoves.length;
+  const isInTheory = movesSan.length <= matchedPlies;
+
+  let deviation: OpeningDeviation | undefined;
+
+  // If the game continued beyond the matched theory
+  if (movesSan.length > matchedPlies) {
+    const nextGameMove = movesSan[matchedPlies];
+    // Look for any longer openings that branched from here
+    const prefix = movesSan.slice(0, matchedPlies).join(' ');
+    const candidates = prefixMap.get(prefix) || [];
+
+    const theoreticalCandidate = candidates.find((c) => {
+      const cMoves = c.moves.split(' ');
+      return cMoves.length > matchedPlies;
+    });
+
+    if (theoreticalCandidate) {
+      const cMoves = theoreticalCandidate.moves.split(' ');
+      deviation = {
+        ply: matchedPlies + 1,
+        playedMove: nextGameMove,
+        theoreticalMove: cMoves[matchedPlies],
+        continuation: cMoves.slice(matchedPlies),
+      };
+    }
+  }
+
+  // Find candidate theoretical continuations from the current position
+  const currentKey = movesSan.join(' ');
+  const matchingOpenings = prefixMap.get(currentKey) || [];
+  const candidateContinuations: { move: string; openingName: string; eco: string }[] = [];
+  const seenMoves = new Set<string>();
+
+  for (const opt of matchingOpenings) {
+    const optMoves = opt.moves.split(' ');
+    if (optMoves.length > movesSan.length) {
+      const nextMove = optMoves[movesSan.length];
+      if (!seenMoves.has(nextMove)) {
+        seenMoves.add(nextMove);
+        candidateContinuations.push({
+          move: nextMove,
+          openingName: opt.name,
+          eco: opt.eco,
+        });
+      }
+    }
+  }
+
+  return {
+    opening,
+    matchedPlies,
+    totalTheoryPlies: theoryMoves.length,
+    isInTheory,
+    deviation,
+    candidateContinuations: candidateContinuations.slice(0, 5),
+  };
+}
+
+/**
+ * Returns top theoretical continuations for a given played sequence.
+ */
+export function getOpeningContinuations(movesSan: string[]): {
+  move: string;
+  name: string;
+  eco: string;
+}[] {
+  const currentKey = movesSan.join(' ');
+  const candidates = prefixMap.get(currentKey) || [];
+  const results: { move: string; name: string; eco: string }[] = [];
+  const seen = new Set<string>();
+
+  for (const c of candidates) {
+    const moves = c.moves.split(' ');
+    if (moves.length > movesSan.length) {
+      const nextMove = moves[movesSan.length];
+      if (!seen.has(nextMove)) {
+        seen.add(nextMove);
+        results.push({ move: nextMove, name: c.name, eco: c.eco });
+      }
+    }
+  }
+  return results.slice(0, 5);
 }
