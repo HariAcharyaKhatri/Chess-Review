@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { AccuracyService } from '../src/chess/accuracy';
+import { PositionService } from '../src/chess/positionService';
 
 describe('AccuracyService', () => {
   it('converts centipawns to win probability monotonically', () => {
@@ -116,6 +117,44 @@ describe('AccuracyService', () => {
     expect(metrics.acpl).toBeGreaterThan(150);
   });
 
+  it('correctly models 800 Elo performance in the realistic 65-80% range instead of inflated 90%+', () => {
+    const elo800Accuracies: number[] = [];
+    const elo800Cpls: number[] = [];
+
+    // 4 sound opening / best moves
+    for (let i = 0; i < 4; i++) {
+      elo800Accuracies.push(100);
+      elo800Cpls.push(0);
+    }
+    // 6 good playable moves (loss ~25 cp)
+    for (let i = 0; i < 6; i++) {
+      elo800Accuracies.push(AccuracyService.calculateMoveAccuracy(52, 50, 25));
+      elo800Cpls.push(25);
+    }
+    // 4 minor inaccuracies (loss ~50 cp)
+    for (let i = 0; i < 4; i++) {
+      elo800Accuracies.push(AccuracyService.calculateMoveAccuracy(50, 46, 50));
+      elo800Cpls.push(50);
+    }
+    // 3 mistakes (loss ~130 cp)
+    for (let i = 0; i < 3; i++) {
+      elo800Accuracies.push(AccuracyService.calculateMoveAccuracy(50, 38, 130));
+      elo800Cpls.push(130);
+    }
+    // 3 blunders (loss ~300 cp)
+    for (let i = 0; i < 3; i++) {
+      elo800Accuracies.push(AccuracyService.calculateMoveAccuracy(50, 25, 300));
+      elo800Cpls.push(300);
+    }
+
+    const metrics = AccuracyService.calculateAggregateMetrics(elo800Accuracies, elo800Cpls);
+    // Typical 800-Elo game should be in the ~68-76% range, NEVER 90%+
+    expect(metrics.accuracy).toBeGreaterThanOrEqual(65);
+    expect(metrics.accuracy).toBeLessThanOrEqual(80);
+    expect(metrics.acpl).toBeGreaterThanOrEqual(50);
+    expect(metrics.acpl).toBeLessThanOrEqual(120);
+  });
+
   it('maintains strict mathematical symmetry between White and Black win probabilities', () => {
     const whiteAdvScore = { type: 'cp' as const, value: 200 };
     const blackAdvScore = { type: 'cp' as const, value: -200 };
@@ -130,5 +169,18 @@ describe('AccuracyService', () => {
     expect(whiteWinProbWhenBlackAhead + blackWinProbWhenBlackAhead).toBeCloseTo(100, 5);
     expect(whiteWinProbWhenWhiteAhead).toBeCloseTo(blackWinProbWhenBlackAhead, 5);
     expect(blackWinProbWhenWhiteAhead).toBeCloseTo(whiteWinProbWhenBlackAhead, 5);
+  });
+
+  it('correctly distinguishes board-wide forced moves from single piece move counts', () => {
+    // Starting position: 20 legal moves across the board -> NOT forced
+    expect(
+      PositionService.isForcedMove('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1')
+    ).toBe(false);
+
+    // Position with strictly 1 legal move across the whole board (Kxb7)
+    const forcedFen = 'K1r5/1r6/8/8/8/8/8/7k w - - 0 1';
+    const legalMoves = PositionService.getAllLegalMoves(forcedFen);
+    expect(legalMoves.length).toBe(1);
+    expect(PositionService.isForcedMove(forcedFen)).toBe(true);
   });
 });

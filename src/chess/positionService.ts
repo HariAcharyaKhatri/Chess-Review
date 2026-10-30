@@ -53,6 +53,30 @@ export class PositionService {
   }
 
   /**
+   * Gets all legal moves for the current side to move across the entire board.
+   */
+  static getAllLegalMoves(fen: string): Move[] {
+    try {
+      const chess = new Chess(fen);
+      return chess.moves({ verbose: true });
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Returns whether the position has exactly one legal move on the entire board (strictly forced move).
+   */
+  static isForcedMove(fen: string): boolean {
+    try {
+      const chess = new Chess(fen);
+      return chess.moves().length === 1;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Validates if a move is legal and returns the resulting FEN.
    */
   static makeMove(fen: string, from: Square, to: Square, promotion?: string): { valid: boolean; newFen?: string; san?: string; uci?: string } {

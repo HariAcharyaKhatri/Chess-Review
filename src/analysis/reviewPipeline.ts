@@ -95,31 +95,29 @@ export class ReviewPipeline {
         : '';
 
       const isBestMove =
-        (move.uci && bestMoveUci && move.uci.toLowerCase() === bestMoveUci.toLowerCase()) ||
-        (bestMoveSan && move.san === bestMoveSan);
+        Boolean(move.uci && bestMoveUci && move.uci.toLowerCase() === bestMoveUci.toLowerCase()) ||
+        Boolean(bestMoveSan && move.san === bestMoveSan);
 
-      const legalMoves = PositionService.getLegalMovesForSquare(
-        move.fenBefore,
-        move.uci.substring(0, 2) as any
-      );
-      const isForced = legalMoves.length === 1;
-
-      // Book move detection from standard opening theory
-      const currentSanPrefix = moves.slice(0, i + 1).map((m) => m.san);
-      const isBook = i < 16 && isOpeningBookMove(currentSanPrefix);
+      // Total legal moves across the whole board (strictly forced move test)
+      const allLegalMoves = PositionService.getAllLegalMoves(move.fenBefore);
+      const isForced = allLegalMoves.length === 1;
 
       let winProbBefore = AccuracyService.getPlayerWinProbability(evalBefore.score, move.turn);
       let winProbAfter = AccuracyService.getPlayerWinProbability(evalAfter.score, move.turn);
-      let cpl = 0;
+      let cpl = AccuracyService.calculateCentipawnLoss(evalBefore.score, evalAfter.score, move.turn);
+
+      // Book move detection: must be early (<= 10 plies / 5 moves), in theory, and sound (cpl <= 25)
+      const currentSanPrefix = moves.slice(0, i + 1).map((m) => m.san);
+      const isBook = i < 10 && cpl <= 25 && isOpeningBookMove(currentSanPrefix);
+
       let moveAccuracy = 100;
 
-      if (isBestMove || isForced || isBook) {
+      if (isBestMove || isForced) {
         cpl = 0;
         moveAccuracy = 100;
         winProbAfter = Math.max(winProbBefore, winProbAfter);
       } else {
-        cpl = AccuracyService.calculateCentipawnLoss(evalBefore.score, evalAfter.score, move.turn);
-        moveAccuracy = AccuracyService.calculateMoveAccuracy(winProbBefore, winProbAfter);
+        moveAccuracy = AccuracyService.calculateMoveAccuracy(winProbBefore, winProbAfter, cpl);
       }
 
       const isCapture = move.san.includes('x');
@@ -136,7 +134,7 @@ export class ReviewPipeline {
         centipawnLoss: cpl,
         winProbBefore,
         winProbAfter,
-        legalMoveCount: legalMoves.length,
+        legalMoveCount: allLegalMoves.length,
         ply: move.ply,
         isCapture,
         pieceType,

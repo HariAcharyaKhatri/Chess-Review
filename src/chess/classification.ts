@@ -55,9 +55,8 @@ export class ClassificationService {
 
     // 3. Engine First Choice Check (Must always take priority over blunder/mistake thresholds)
     const isEngineFirstChoice =
-      (context.uci && bestMove && context.uci.toLowerCase() === bestMove.toLowerCase()) ||
-      (bestMoveSan && san === bestMoveSan) ||
-      centipawnLoss === 0;
+      Boolean(context.uci && bestMove && context.uci.toLowerCase() === bestMove.toLowerCase()) ||
+      Boolean(bestMoveSan && san === bestMoveSan);
 
     // 4. Brilliant move check: sacrifice piece (or decisive quiet move) with strong winning eval
     if (

@@ -64,14 +64,35 @@ export class AccuracyService {
   }
 
   /**
-   * Calculates accuracy percentage for a single move based on win probability loss.
+   * Calculates accuracy percentage for a single move based on win probability loss
+   * and tactical error magnitude (centipawn loss).
+   *
+   * Solves the 'lost position anomaly' where further material blunders in an already
+   * lost game only drop win probability by 2-5%, which would otherwise assign artificially
+   * high scores (70-80%) to major blunders.
    */
-  static calculateMoveAccuracy(winProbBefore: number, winProbAfter: number): number {
+  static calculateMoveAccuracy(
+    winProbBefore: number,
+    winProbAfter: number,
+    centipawnLoss: number = 0
+  ): number {
     const deltaWinProb = Math.max(0, winProbBefore - winProbAfter);
-    if (deltaWinProb <= 0.001) return 100;
+    if (deltaWinProb <= 0.001 && centipawnLoss <= 5) return 100;
 
-    // Exponential decay formula calibrated for chess moves
-    const rawAccuracy = 103.1668 * Math.exp(-0.04354 * deltaWinProb) - 3.1668;
+    // Standard CAPS-calibrated exponential decay on win probability loss
+    const wpAccuracy = 103.1668 * Math.exp(-0.04354 * deltaWinProb) - 3.1668;
+
+    // Tactical error bound based on centipawn loss:
+    // If the player remains overwhelmingly winning (winProbBefore >= 85 && winProbAfter >= 80),
+    // a safe simplification (e.g. trading queens for a slightly slower mate) is not penalized.
+    const isDecisivelyWinningSimplification = winProbBefore >= 85 && winProbAfter >= 80;
+
+    let cplAccuracy = 100;
+    if (centipawnLoss > 15 && !isDecisivelyWinningSimplification) {
+      cplAccuracy = 100 * Math.exp(-0.0055 * centipawnLoss);
+    }
+
+    const rawAccuracy = Math.min(wpAccuracy, cplAccuracy);
     return Math.max(0, Math.min(100, Math.round(rawAccuracy * 10) / 10));
   }
 
