@@ -68,6 +68,15 @@ export function lookupOpening(movesSan: string[]): OpeningInfo | undefined {
 }
 
 /**
+ * Checks whether the played sequence of SAN moves corresponds to established opening book theory.
+ */
+export function isOpeningBookMove(movesSan: string[]): boolean {
+  if (!movesSan || movesSan.length === 0 || movesSan.length > 20) return false;
+  const key = movesSan.join(' ');
+  return openingsMap.has(key) || prefixMap.has(key);
+}
+
+/**
  * Performs deep opening analysis on a sequence of moves.
  * Detects the identified opening, whether the position is still within theory,
  * the exact deviation point (if any), and theoretical next moves.

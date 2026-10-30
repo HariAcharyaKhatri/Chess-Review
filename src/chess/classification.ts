@@ -15,6 +15,7 @@ export interface MoveContext {
   ply: number;
   isCapture: boolean;
   pieceType?: string;
+  isBook?: boolean;
 }
 
 export class ClassificationService {
@@ -33,6 +34,7 @@ export class ClassificationService {
       ply,
       evalBefore,
       evalAfter,
+      isBook,
     } = context;
 
     // 1. Forced move check (only 1 legal move available)
@@ -43,89 +45,114 @@ export class ClassificationService {
       };
     }
 
-    // 2. Book opening moves (first 3-4 plies if standard)
-    if (ply <= 4 && centipawnLoss <= 15) {
+    // 2. Book opening moves (from verified openings database or early plies with negligible loss)
+    if (isBook || (ply <= 6 && centipawnLoss <= 20)) {
       return {
         classification: 'book',
         commentary: `Book move. Standard opening theory (${san}).`,
       };
     }
 
-    const deltaWinProb = Math.max(0, winProbBefore - winProbAfter);
-    const wasWinning = winProbBefore >= 75 || (evalBefore.type === 'mate' && evalBefore.value > 0);
-    const nowEqualOrLosing = winProbAfter <= 55 && (evalAfter.type !== 'mate' || evalAfter.value <= 0);
+    // 3. Engine First Choice Check (Must always take priority over blunder/mistake thresholds)
+    const isEngineFirstChoice =
+      (context.uci && bestMove && context.uci.toLowerCase() === bestMove.toLowerCase()) ||
+      (bestMoveSan && san === bestMoveSan) ||
+      centipawnLoss === 0;
 
-    // 3. Missed win: player was winning comfortably, but let the advantage slip away
-    if (wasWinning && nowEqualOrLosing && (deltaWinProb >= 25 || centipawnLoss >= 200)) {
-      const bestTxt = bestMoveSan ? ` Best was ${bestMoveSan}.` : '';
-      return {
-        classification: 'missed_win',
-        commentary: `Missed win. A winning tactical advantage was let slip.${bestTxt}`,
-      };
-    }
-
-    // 4. Blunder: massive drop in win probability or high CPL
-    if (deltaWinProb >= 30 || centipawnLoss >= 250) {
-      const bestTxt = bestMoveSan ? ` The engine preferred ${bestMoveSan}.` : '';
-      return {
-        classification: 'blunder',
-        commentary: `Blunder. This move severely damages the position, losing significant material or tactical balance.${bestTxt}`,
-      };
-    }
-
-    // 5. Mistake: substantial error
-    if (deltaWinProb >= 15 || centipawnLoss >= 130) {
-      const bestTxt = bestMoveSan ? ` Stronger was ${bestMoveSan}.` : '';
-      return {
-        classification: 'mistake',
-        commentary: `Mistake. This gives away the initiative or concessions.${bestTxt}`,
-      };
-    }
-
-    // 6. Inaccuracy: minor mistake
-    if (deltaWinProb >= 7 || centipawnLoss >= 65) {
-      const bestTxt = bestMoveSan ? ` More precise was ${bestMoveSan}.` : '';
-      return {
-        classification: 'inaccuracy',
-        commentary: `Inaccuracy. A slightly suboptimal choice that cedes minor ground.${bestTxt}`,
-      };
-    }
-
-    // 7. Check if best move was matched or virtually zero loss
-    const isEngineFirstChoice = (context.uci === bestMove) || (bestMoveSan && san === bestMoveSan);
-
-    // 8. Brilliant move check: sacrifice piece (or decisive quiet move) with strong winning eval
+    // 4. Brilliant move check: sacrifice piece (or decisive quiet move) with strong winning eval
     if (
       isEngineFirstChoice &&
       evalBefore.type === 'cp' &&
       evalAfter.type === 'cp' &&
-      winProbAfter >= 80 &&
+      winProbAfter >= 75 &&
       context.isCapture === false &&
       (context.pieceType === 'q' || context.pieceType === 'r' || context.pieceType === 'b' || context.pieceType === 'n') &&
       centipawnLoss <= 5
     ) {
-      // If it is a major piece exposed in a sharp win
       return {
         classification: 'brilliant',
         commentary: 'Brilliant move! A tactical masterstroke that cements decisive victory.',
       };
     }
 
-    // 9. Best / Excellent / Good
-    if (isEngineFirstChoice || centipawnLoss <= 12) {
+    // 5. Best move: matches top engine line or has virtually zero loss
+    if (isEngineFirstChoice || centipawnLoss <= 10) {
       return {
         classification: 'best',
-        commentary: 'Best move. Finds the engine\'s top continuation.',
+        commentary: "Best move. Finds the engine's top continuation.",
       };
     }
 
-    if (centipawnLoss <= 30) {
+    // Non-best moves: determine error severity based on delta win probability and positions
+    const deltaWinProb = Math.max(0, winProbBefore - winProbAfter);
+    const wasWinning = winProbBefore >= 75 || (evalBefore.type === 'mate' && evalBefore.value > 0);
+    const nowEqualOrLosing = winProbAfter <= 55 && (evalAfter.type !== 'mate' || evalAfter.value <= 0);
+
+    const bestTxt = bestMoveSan ? ` Best was ${bestMoveSan}.` : '';
+
+    // 6. Missed win: player was winning comfortably, but surrendered advantage back to equal or losing
+    if (wasWinning && nowEqualOrLosing && (deltaWinProb >= 20 || centipawnLoss >= 180)) {
+      return {
+        classification: 'missed_win',
+        commentary: `Missed win. A winning tactical advantage was let slip.${bestTxt}`,
+      };
+    }
+
+    // 7. Decisive Advantage Handling (Winning Simplification)
+    // If the player remains overwhelmingly winning (winProbAfter >= 80%),
+    // selecting a safe simplification or slightly slower winning path is NEVER a blunder or mistake.
+    if (winProbBefore >= 85 && winProbAfter >= 80) {
+      if (centipawnLoss <= 40 || deltaWinProb <= 2) {
+        return {
+          classification: 'excellent',
+          commentary: 'Excellent move. Simplifies the position while retaining a crushing advantage.',
+        };
+      }
+      if (centipawnLoss <= 150 || deltaWinProb <= 6) {
+        return {
+          classification: 'good',
+          commentary: 'Good move. Maintains a decisive winning advantage.',
+        };
+      }
+      return {
+        classification: 'inaccuracy',
+        commentary: `Inaccuracy. Slower than the engine's quickest winning line.${bestTxt}`,
+      };
+    }
+
+    // 8. Blunder: massive drop in win probability or high damage error
+    if (deltaWinProb >= 25 || (centipawnLoss >= 250 && winProbAfter <= 65)) {
+      return {
+        classification: 'blunder',
+        commentary: `Blunder. This move severely damages the position, losing significant material or tactical balance.${bestTxt}`,
+      };
+    }
+
+    // 9. Mistake: substantial error
+    if (deltaWinProb >= 12 || (centipawnLoss >= 130 && winProbAfter <= 75)) {
+      return {
+        classification: 'mistake',
+        commentary: `Mistake. This gives away the initiative or concessions.${bestTxt}`,
+      };
+    }
+
+    // 10. Inaccuracy: minor mistake
+    if (deltaWinProb >= 6 || centipawnLoss >= 60) {
+      return {
+        classification: 'inaccuracy',
+        commentary: `Inaccuracy. A slightly suboptimal choice that cedes minor ground.${bestTxt}`,
+      };
+    }
+
+    // 11. Excellent: close to best
+    if (centipawnLoss <= 25 || deltaWinProb <= 2.5) {
       return {
         classification: 'excellent',
         commentary: 'Excellent move. Nearly as strong as the top engine line.',
       };
     }
 
+    // 12. Good: solid playable move
     return {
       classification: 'good',
       commentary: 'Good move. Keeps a solid and playable position.',

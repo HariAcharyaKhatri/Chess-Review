@@ -1,4 +1,4 @@
-import { PositionEvaluation, EngineTelemetry, BenchmarkResult } from '../types/chess';
+import { PositionEvaluation, EngineTelemetry, BenchmarkResult, EngineScore } from '../types/chess';
 import { UciParser } from './uciParser';
 
 export type EngineStatus = 'uninitialized' | 'initializing' | 'ready' | 'evaluating' | 'error';
@@ -71,6 +71,7 @@ export class EngineClient {
   private currentReject: ((err: Error) => void) | null = null;
   private currentTelemetryCallback: ((telemetry: EngineTelemetry) => void) | null = null;
   private latestEvaluation: PositionEvaluation | null = null;
+  private currentEvaluatingFen: string | null = null;
   private isEvaluating = false;
   private initPromise: Promise<void> | null = null;
   private lastError: string | null = null;
@@ -271,8 +272,18 @@ export class EngineClient {
     if (line.startsWith('info ')) {
       const parsed = UciParser.parseInfoLine(line);
       if (parsed && parsed.score) {
+        // UCI specification: Stockfish reports score from the perspective of the side to move in that FEN.
+        // We normalize to White's perspective (positive = white advantage) as required by EngineScore.
+        const fenTurn = this.currentEvaluatingFen
+          ? (this.currentEvaluatingFen.split(' ')[1] as 'w' | 'b')
+          : 'w';
+        const normalizedScore: EngineScore = {
+          type: parsed.score.type,
+          value: fenTurn === 'b' ? -parsed.score.value : parsed.score.value,
+        };
+
         this.latestEvaluation = {
-          score: parsed.score,
+          score: normalizedScore,
           depth: parsed.depth || 1,
           seldepth: parsed.seldepth,
           bestMove: parsed.bestMove || (this.latestEvaluation ? this.latestEvaluation.bestMove : ''),
@@ -285,8 +296,21 @@ export class EngineClient {
           hashfull: parsed.hashfull,
         };
 
-        const telemetry = UciParser.parseTelemetry(line);
-        if (telemetry && this.currentTelemetryCallback) {
+        if (this.currentTelemetryCallback) {
+          const telemetry: EngineTelemetry = {
+            depth: parsed.depth || 1,
+            seldepth: parsed.seldepth,
+            score: normalizedScore,
+            nodes: parsed.nodes || 0,
+            nps: parsed.nps || 0,
+            timeMs: parsed.timeMs || 0,
+            pv: parsed.pv || [],
+            bestMove: parsed.bestMove || (parsed.pv && parsed.pv[0]) || '',
+            currmove: parsed.currmove,
+            currmovenumber: parsed.currmovenumber,
+            hashfull: parsed.hashfull,
+            rawScoreString: UciParser.formatScore(normalizedScore),
+          };
           this.currentTelemetryCallback(telemetry);
         }
       }
@@ -304,6 +328,7 @@ export class EngineClient {
         this.isEvaluating = false;
         this.status = 'ready';
         this.currentTelemetryCallback = null;
+        this.currentEvaluatingFen = null;
 
         if (this.currentResolve) {
           const resolve = this.currentResolve;
@@ -382,6 +407,7 @@ export class EngineClient {
       this.isEvaluating = true;
       this.status = 'evaluating';
       this.latestEvaluation = null;
+      this.currentEvaluatingFen = fen;
       this.currentResolve = resolve;
       this.currentReject = reject;
       this.currentTelemetryCallback = onTelemetry || null;
@@ -418,12 +444,14 @@ export class EngineClient {
       const origResolve = this.currentResolve;
       this.currentResolve = (result) => {
         clearTimeout(timer);
+        this.currentEvaluatingFen = null;
         origResolve?.(result);
       };
 
       const origReject = this.currentReject;
       this.currentReject = (err) => {
         clearTimeout(timer);
+        this.currentEvaluatingFen = null;
         origReject?.(err);
       };
     });
@@ -438,6 +466,7 @@ export class EngineClient {
       this.isEvaluating = false;
       this.status = 'ready';
       this.currentTelemetryCallback = null;
+      this.currentEvaluatingFen = null;
     }
   }
 

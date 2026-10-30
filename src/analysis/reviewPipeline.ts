@@ -4,6 +4,7 @@ import { PositionService } from '../chess/positionService';
 import { engineClient } from '../engine/engineClient';
 import { AccuracyService } from '../chess/accuracy';
 import { ClassificationService } from '../chess/classification';
+import { isOpeningBookMove } from '../chess/openings';
 
 export interface AnalysisPipelineOptions {
   depth: number;
@@ -93,15 +94,33 @@ export class ReviewPipeline {
         ? PositionService.uciToSan(move.fenBefore, bestMoveUci) || bestMoveUci
         : '';
 
-      const winProbBefore = AccuracyService.getPlayerWinProbability(evalBefore.score, move.turn);
-      const winProbAfter = AccuracyService.getPlayerWinProbability(evalAfter.score, move.turn);
-      const cpl = AccuracyService.calculateCentipawnLoss(evalBefore.score, evalAfter.score, move.turn);
-      const moveAccuracy = AccuracyService.calculateMoveAccuracy(winProbBefore, winProbAfter);
+      const isBestMove =
+        (move.uci && bestMoveUci && move.uci.toLowerCase() === bestMoveUci.toLowerCase()) ||
+        (bestMoveSan && move.san === bestMoveSan);
 
       const legalMoves = PositionService.getLegalMovesForSquare(
         move.fenBefore,
         move.uci.substring(0, 2) as any
       );
+      const isForced = legalMoves.length === 1;
+
+      // Book move detection from standard opening theory
+      const currentSanPrefix = moves.slice(0, i + 1).map((m) => m.san);
+      const isBook = i < 16 && isOpeningBookMove(currentSanPrefix);
+
+      let winProbBefore = AccuracyService.getPlayerWinProbability(evalBefore.score, move.turn);
+      let winProbAfter = AccuracyService.getPlayerWinProbability(evalAfter.score, move.turn);
+      let cpl = 0;
+      let moveAccuracy = 100;
+
+      if (isBestMove || isForced || isBook) {
+        cpl = 0;
+        moveAccuracy = 100;
+        winProbAfter = Math.max(winProbBefore, winProbAfter);
+      } else {
+        cpl = AccuracyService.calculateCentipawnLoss(evalBefore.score, evalAfter.score, move.turn);
+        moveAccuracy = AccuracyService.calculateMoveAccuracy(winProbBefore, winProbAfter);
+      }
 
       const isCapture = move.san.includes('x');
       const pieceType = move.uci.length >= 2 ? move.san.match(/^[NBRQK]/)?.[0]?.toLowerCase() : 'p';
@@ -121,6 +140,7 @@ export class ReviewPipeline {
         ply: move.ply,
         isCapture,
         pieceType,
+        isBook,
       });
 
       const moveAnalysis: MoveAnalysis = {

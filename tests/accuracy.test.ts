@@ -61,4 +61,74 @@ describe('AccuracyService', () => {
     expect(res.accuracy).toBe(90);
     expect(res.acpl).toBe(20);
   });
+
+  it('correctly models Grandmaster (Hikaru Nakamura) performance at 96-99% accuracy', () => {
+    // A typical GM game consists of top engine moves, with minor variations and rare inaccuracies
+    const gmAccuracies: number[] = [];
+    const gmCpls: number[] = [];
+
+    // 25 best / book moves
+    for (let i = 0; i < 25; i++) {
+      gmAccuracies.push(100);
+      gmCpls.push(0);
+    }
+    // 4 excellent moves (deltaWinProb ~ 1%, CPL ~ 12)
+    for (let i = 0; i < 4; i++) {
+      const acc = AccuracyService.calculateMoveAccuracy(55, 54);
+      gmAccuracies.push(acc);
+      gmCpls.push(12);
+    }
+    // 1 minor inaccuracy (deltaWinProb ~ 5%, CPL ~ 45)
+    const inacc = AccuracyService.calculateMoveAccuracy(55, 50);
+    gmAccuracies.push(inacc);
+    gmCpls.push(45);
+
+    const metrics = AccuracyService.calculateAggregateMetrics(gmAccuracies, gmCpls);
+    expect(metrics.accuracy).toBeGreaterThanOrEqual(96);
+    expect(metrics.accuracy).toBeLessThanOrEqual(99.5);
+    expect(metrics.acpl).toBeLessThan(10);
+  });
+
+  it('correctly reflects low accuracy in blunder-heavy games without artificial inflation', () => {
+    const blunderAccuracies: number[] = [];
+    const blunderCpls: number[] = [];
+
+    // 2 opening moves
+    for (let i = 0; i < 2; i++) {
+      blunderAccuracies.push(100);
+      blunderCpls.push(0);
+    }
+    // 5 mistakes (delta ~15%)
+    for (let i = 0; i < 5; i++) {
+      blunderAccuracies.push(AccuracyService.calculateMoveAccuracy(50, 35));
+      blunderCpls.push(150);
+    }
+    // 8 blunders (delta ~35% - 50%)
+    for (let i = 0; i < 8; i++) {
+      blunderAccuracies.push(AccuracyService.calculateMoveAccuracy(50, 10));
+      blunderCpls.push(400);
+    }
+
+    const metrics = AccuracyService.calculateAggregateMetrics(blunderAccuracies, blunderCpls);
+    // Real blunder game should be low (~30-40%), not inflated
+    expect(metrics.accuracy).toBeLessThan(45);
+    expect(metrics.accuracy).toBeGreaterThan(20);
+    expect(metrics.acpl).toBeGreaterThan(150);
+  });
+
+  it('maintains strict mathematical symmetry between White and Black win probabilities', () => {
+    const whiteAdvScore = { type: 'cp' as const, value: 200 };
+    const blackAdvScore = { type: 'cp' as const, value: -200 };
+
+    const whiteWinProbWhenWhiteAhead = AccuracyService.getPlayerWinProbability(whiteAdvScore, 'w');
+    const blackWinProbWhenWhiteAhead = AccuracyService.getPlayerWinProbability(whiteAdvScore, 'b');
+
+    const whiteWinProbWhenBlackAhead = AccuracyService.getPlayerWinProbability(blackAdvScore, 'w');
+    const blackWinProbWhenBlackAhead = AccuracyService.getPlayerWinProbability(blackAdvScore, 'b');
+
+    expect(whiteWinProbWhenWhiteAhead + blackWinProbWhenWhiteAhead).toBeCloseTo(100, 5);
+    expect(whiteWinProbWhenBlackAhead + blackWinProbWhenBlackAhead).toBeCloseTo(100, 5);
+    expect(whiteWinProbWhenWhiteAhead).toBeCloseTo(blackWinProbWhenBlackAhead, 5);
+    expect(blackWinProbWhenWhiteAhead).toBeCloseTo(whiteWinProbWhenBlackAhead, 5);
+  });
 });

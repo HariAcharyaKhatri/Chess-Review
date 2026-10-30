@@ -77,4 +77,51 @@ describe('ClassificationService', () => {
 
     expect(res.classification).toBe('best');
   });
+
+  it('never marks winning simplifications as blunders or mistakes when position remains overwhelmingly won', () => {
+    // Player is completely winning (+8.00 / 96% win prob).
+    // Trades queens: CPL is 100 cp, win prob drops by 4% to 92% (still totally won).
+    const res = ClassificationService.classifyMove({
+      san: 'Qxd8+',
+      uci: 'd1d8',
+      bestMove: 'e1g1',
+      bestMoveSan: 'O-O',
+      turn: 'w',
+      evalBefore: { type: 'cp', value: 800 },
+      evalAfter: { type: 'cp', value: 700 },
+      centipawnLoss: 100,
+      winProbBefore: 96,
+      winProbAfter: 92,
+      legalMoveCount: 28,
+      ply: 30,
+      isCapture: true,
+      pieceType: 'q',
+    });
+
+    // Should NOT be blunder or mistake
+    expect(res.classification).not.toBe('blunder');
+    expect(res.classification).not.toBe('mistake');
+    expect(['good', 'excellent']).toContain(res.classification);
+  });
+
+  it('classifies verified opening book moves as book', () => {
+    const res = ClassificationService.classifyMove({
+      san: 'e5',
+      uci: 'e7e5',
+      bestMove: 'e7e5',
+      bestMoveSan: 'e5',
+      turn: 'b',
+      evalBefore: { type: 'cp', value: 25 },
+      evalAfter: { type: 'cp', value: 20 },
+      centipawnLoss: 0,
+      winProbBefore: 47,
+      winProbAfter: 48,
+      legalMoveCount: 20,
+      ply: 2,
+      isCapture: false,
+      isBook: true,
+    });
+
+    expect(res.classification).toBe('book');
+  });
 });
