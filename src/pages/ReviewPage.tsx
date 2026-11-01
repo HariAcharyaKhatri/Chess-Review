@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { GameMetadata, GameAnalysisResult, MoveAnalysis } from '../types/chess';
 import { storageService } from '../storage/indexedDb';
 import { sessionManager } from '../analysis/sessionManager';
@@ -16,7 +16,22 @@ import { MistakeTrainerModal } from '../components/MistakeTrainer/MistakeTrainer
 import { ImprovementPlanModal } from '../components/ImprovementPlan/ImprovementPlanModal';
 import { analyzeOpening, OpeningAnalysisResult } from '../chess/openings';
 import { ImprovementService, PersonalizedImprovementPlan } from '../services/improvementService';
-import { Download, FileJson, ArrowLeft, Swords, BookOpen, Target, Award, Layout, ListFilter } from 'lucide-react';
+import {
+  Download,
+  FileJson,
+  ArrowLeft,
+  Swords,
+  BookOpen,
+  Target,
+  Award,
+  ListFilter,
+  BarChart2,
+  Lightbulb,
+  ExternalLink,
+  ChevronRight,
+} from 'lucide-react';
+
+type ReviewTab = 'insight' | 'moves' | 'report' | 'opening' | 'drills';
 
 export const ReviewPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -29,6 +44,9 @@ export const ReviewPage: React.FC = () => {
   const [orientation, setOrientation] = useState<'white' | 'black'>('white');
   const [boardTheme, setBoardTheme] = useState<'green' | 'blue' | 'brown'>('green');
 
+  // Active tab in review panel: 'insight' | 'moves' | 'report' | 'opening' | 'drills'
+  const [activeTab, setActiveTab] = useState<ReviewTab>('insight');
+
   // Modals state
   const [isOpeningCoachOpen, setIsOpeningCoachOpen] = useState(false);
   const [isMistakeTrainerOpen, setIsMistakeTrainerOpen] = useState(false);
@@ -37,9 +55,6 @@ export const ReviewPage: React.FC = () => {
   // Derived analysis features
   const [openingAnalysis, setOpeningAnalysis] = useState<OpeningAnalysisResult | undefined>();
   const [improvementPlan, setImprovementPlan] = useState<PersonalizedImprovementPlan | undefined>();
-
-  // Mobile active tab view: 'board' | 'moves' | 'coach'
-  const [mobileTab, setMobileTab] = useState<'board' | 'moves' | 'coach'>('board');
 
   useEffect(() => {
     loadGamesAndSettings();
@@ -184,18 +199,26 @@ export const ReviewPage: React.FC = () => {
 
   if (!activeGame) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-16 text-center space-y-4">
+      <div className="max-w-4xl mx-auto px-4 py-20 text-center space-y-4">
         <Swords className="h-12 w-12 text-slate-600 mx-auto" />
         <h2 className="text-xl font-bold text-white">No Game Selected for Review</h2>
         <p className="text-sm text-slate-400">
           Import or select a game in the Analysis dashboard to begin reviewing.
         </p>
-        <button
-          onClick={() => navigate('/analysis')}
-          className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm transition-colors cursor-pointer"
-        >
-          Go to Analysis
-        </button>
+        <div className="flex justify-center gap-3 pt-2">
+          <Link
+            to="/import"
+            className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm transition-colors cursor-pointer"
+          >
+            Import Games
+          </Link>
+          <Link
+            to="/analysis"
+            className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-sm transition-colors cursor-pointer"
+          >
+            Go to Analysis
+          </Link>
+        </div>
       </div>
     );
   }
@@ -212,179 +235,117 @@ export const ReviewPage: React.FC = () => {
     }
   }
 
+  // Count mistakes for drill badge
+  const mistakesCount = improvementPlan?.practicePositions.length || 0;
+
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-      {/* Top Header & Game Selector */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
-        <div className="flex items-center gap-3">
+    <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-6 py-3 lg:py-4 space-y-3 lg:h-[calc(100vh-4.25rem)] lg:flex lg:flex-col lg:overflow-hidden">
+      {/* Top Header & Fast Action Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2.5 bg-slate-900/95 border border-slate-800 rounded-xl px-3.5 py-2 shadow-md shrink-0">
+        <div className="flex items-center gap-2.5 min-w-0">
           <button
             onClick={() => navigate('/analysis')}
-            className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
-            title="Back to games list"
+            className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer shrink-0"
+            title="Back to games"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2">
-              <span>{activeGame.white}</span>
+          <div className="min-w-0">
+            <h1 className="text-sm sm:text-base font-bold text-white flex items-center gap-1.5 truncate">
+              <span className="truncate">{activeGame.white}</span>
               <span className="text-slate-500 font-normal">vs</span>
-              <span>{activeGame.black}</span>
+              <span className="truncate">{activeGame.black}</span>
+              <span className="text-xs font-mono font-bold text-emerald-400 ml-1">({activeGame.result})</span>
             </h1>
-            <p className="text-xs text-slate-400 flex items-center gap-2 mt-0.5">
-              <span>
-                {openingAnalysis?.opening.name || activeGame.openingName || activeGame.eco || 'Chess Game'}
-              </span>
-              <span>•</span>
-              <span className="font-bold text-slate-300">{activeGame.result}</span>
-              <span>•</span>
-              <span>{activeGame.date}</span>
+            <p className="text-[11px] text-slate-400 truncate hidden sm:block">
+              {openingAnalysis?.opening.name || activeGame.openingName || activeGame.eco || 'Chess Game'} • {activeGame.date}
             </p>
           </div>
         </div>
 
-        {/* Action Controls & Navigation */}
-        <div className="flex items-center gap-2 flex-wrap">
+        {/* Action Controls & Navigation Links */}
+        <div className="flex items-center gap-1.5 flex-wrap shrink-0">
           {games.length > 1 && (
             <select
               value={activeGame.id}
               onChange={(e) => handleSelectGame(e.target.value)}
-              className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200 font-medium focus:outline-none focus:border-emerald-500 max-w-[200px] truncate"
+              className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 font-medium focus:outline-none focus:border-emerald-500 max-w-[150px] sm:max-w-[190px] truncate"
             >
               {games.map((g) => (
                 <option key={g.id} value={g.id}>
-                  {g.white} vs {g.black} ({g.date})
+                  {g.white} vs {g.black}
                 </option>
               ))}
             </select>
           )}
 
+          <Link
+            to={`/report?gameId=${encodeURIComponent(activeGame.id)}`}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 text-xs font-bold transition-colors"
+            title="View dedicated full game report"
+          >
+            <Award className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Full Report</span>
+          </Link>
+
+          <Link
+            to={`/drills?gameId=${encodeURIComponent(activeGame.id)}`}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-rose-300 text-xs font-bold transition-colors"
+            title="Practice mistakes in dedicated drill trainer"
+          >
+            <Target className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Drills ({mistakesCount})</span>
+          </Link>
+
           <button
             onClick={handleExportPgn}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-            title="Download original PGN"
+            className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
+            title="Download PGN"
           >
             <Download className="h-3.5 w-3.5 text-emerald-400" />
-            <span>PGN</span>
           </button>
-
           {analysisResult && (
             <button
               onClick={handleExportJson}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-              title="Download full analysis JSON"
+              className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              title="Download JSON Analysis"
             >
               <FileJson className="h-3.5 w-3.5 text-emerald-400" />
-              <span>JSON</span>
             </button>
           )}
         </div>
       </div>
 
-      {/* AI Intelligence Toolbar: Opening Coach, Mistake Drill, Improvement Plan */}
-      {analysisResult && (
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/90 border border-slate-800 rounded-xl p-3 shadow-lg">
-          <div className="flex items-center gap-2 flex-wrap">
-            {openingAnalysis && (
-              <button
-                onClick={() => setIsOpeningCoachOpen(true)}
-                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-emerald-950/40 hover:bg-emerald-950/60 text-emerald-300 border border-emerald-500/30 text-xs font-semibold transition-all cursor-pointer"
-              >
-                <BookOpen className="h-4 w-4 text-emerald-400" />
-                <span>Opening Coach ({openingAnalysis.opening.eco})</span>
-              </button>
-            )}
-
-            {improvementPlan && improvementPlan.practicePositions.length > 0 && (
-              <button
-                onClick={() => setIsMistakeTrainerOpen(true)}
-                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-rose-950/40 hover:bg-rose-950/60 text-rose-300 border border-rose-500/30 text-xs font-semibold transition-all cursor-pointer"
-              >
-                <Target className="h-4 w-4 text-rose-400" />
-                <span>Drill Mistakes ({improvementPlan.practicePositions.length})</span>
-              </button>
-            )}
-
-            {improvementPlan && (
-              <button
-                onClick={() => setIsImprovementPlanOpen(true)}
-                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-amber-950/30 hover:bg-amber-950/50 text-amber-300 border border-amber-500/30 text-xs font-semibold transition-all cursor-pointer"
-              >
-                <Award className="h-4 w-4 text-amber-400" />
-                <span>Improvement Plan</span>
-              </button>
-            )}
-          </div>
-
-          {/* Quick accuracy badges */}
-          <div className="flex items-center gap-4 text-xs font-mono">
-            <div>
-              {activeGame.white}: <strong className="text-emerald-400">{analysisResult.whiteAccuracy}%</strong>
-            </div>
-            <div>
-              {activeGame.black}: <strong className="text-teal-400">{analysisResult.blackAccuracy}%</strong>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Mobile Tab Switcher (< lg screens) */}
-      <div className="flex lg:hidden bg-slate-900 border border-slate-800 rounded-xl p-1 text-xs font-semibold">
-        <button
-          onClick={() => setMobileTab('board')}
-          className={`flex-1 py-2 text-center rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
-            mobileTab === 'board' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400'
-          }`}
-        >
-          <Layout className="h-3.5 w-3.5" />
-          <span>Board &amp; Review</span>
-        </button>
-        <button
-          onClick={() => setMobileTab('moves')}
-          className={`flex-1 py-2 text-center rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
-            mobileTab === 'moves' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400'
-          }`}
-        >
-          <ListFilter className="h-3.5 w-3.5" />
-          <span>Moves &amp; Filters</span>
-        </button>
-        <button
-          onClick={() => setMobileTab('coach')}
-          className={`flex-1 py-2 text-center rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
-            mobileTab === 'coach' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400'
-          }`}
-        >
-          <Target className="h-3.5 w-3.5" />
-          <span>Report &amp; Drills</span>
-        </button>
-      </div>
-
-      {/* Main Review Workspace */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left: Eval Bar + Chessboard + Controls + Graph */}
-        <div className={`lg:col-span-7 flex flex-col items-center gap-4 ${mobileTab !== 'board' ? 'hidden lg:flex' : ''}`}>
-          <div className="w-full flex items-stretch justify-center gap-3">
-            {/* Vertical Eval bar */}
-            <div className="hidden sm:block">
+      {/* Main Review Workspace: Screen-Fitted / No Scroll on PC */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch flex-1 min-h-0">
+        {/* Left Column: Board + Eval Bar + Navigation Controls + Advantage Curve */}
+        <div className="lg:col-span-7 flex flex-col items-center justify-between gap-2.5 min-h-0">
+          {/* Board Container with Side Eval Bar */}
+          <div className="w-full flex items-stretch justify-center gap-2.5 min-h-0">
+            {/* Vertical Eval Bar (Tablet / PC) */}
+            <div className="hidden sm:flex shrink-0">
               <EvaluationBar
                 score={activeMove ? activeMove.evalAfter.score : undefined}
                 orientation={orientation}
               />
             </div>
 
-            {/* Board */}
-            <div className="flex-1 flex justify-center">
-              <ChessBoard
-                fen={currentFen}
-                orientation={orientation}
-                lastMove={lastMove}
-                bestMove={bestMove}
-                theme={boardTheme}
-                showBestMoveArrow={true}
-              />
+            {/* Chessboard (Dynamically Sized to Prevent Overflow) */}
+            <div className="flex-1 flex justify-center items-center min-h-0">
+              <div className="w-full max-w-[480px] max-h-[min(56vh,480px)] aspect-square flex items-center justify-center">
+                <ChessBoard
+                  fen={currentFen}
+                  orientation={orientation}
+                  lastMove={lastMove}
+                  bestMove={bestMove}
+                  theme={boardTheme}
+                  showBestMoveArrow={true}
+                />
+              </div>
             </div>
           </div>
 
-          {/* Horizontal Eval Bar for Mobile */}
+          {/* Mobile Horizontal Eval Bar */}
           <div className="w-full sm:hidden">
             <EvaluationBar
               score={activeMove ? activeMove.evalAfter.score : undefined}
@@ -393,8 +354,8 @@ export const ReviewPage: React.FC = () => {
             />
           </div>
 
-          {/* Navigation Controls */}
-          <div className="w-full max-w-[560px]">
+          {/* Navigation Stepper Controls */}
+          <div className="w-full max-w-[500px] shrink-0">
             <AnalysisControls
               currentPly={currentPly}
               totalPlies={totalPlies}
@@ -403,14 +364,9 @@ export const ReviewPage: React.FC = () => {
             />
           </div>
 
-          {/* Tactical Explanation Box right below board on mobile */}
-          <div className="w-full max-w-[560px] lg:hidden">
-            <ReviewSummary game={activeGame} activeMove={activeMove} />
-          </div>
-
-          {/* Advantage Graph */}
+          {/* Mini Advantage Graph (PC / Tablet) */}
           {analysisResult && (
-            <div className="w-full max-w-[560px]">
+            <div className="w-full max-w-[500px] shrink-0 hidden sm:block">
               <AnalysisGraph
                 moves={analysisResult.moves}
                 currentPly={currentPly}
@@ -420,101 +376,274 @@ export const ReviewPage: React.FC = () => {
           )}
         </div>
 
-        {/* Right: Review Details & Move List */}
-        <div className={`lg:col-span-5 space-y-4 ${mobileTab === 'board' ? 'hidden lg:block' : ''}`}>
-          {/* Active Move Explanation Box (Desktop) */}
-          <div className="hidden lg:block">
-            <ReviewSummary game={activeGame} activeMove={activeMove} />
+        {/* Right Column: Tabbed Multi-Page Analysis Workspace */}
+        <div className="lg:col-span-5 flex flex-col bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-xl min-h-[380px] lg:h-full">
+          {/* Tab Selection Bar */}
+          <div className="flex items-center border-b border-slate-800 bg-slate-950/70 p-1 gap-1 text-xs font-semibold shrink-0">
+            <button
+              onClick={() => setActiveTab('insight')}
+              className={`flex-1 py-2 px-2 text-center rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'insight'
+                  ? 'bg-slate-800 text-emerald-400 font-bold shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Lightbulb className="h-3.5 w-3.5" />
+              <span>Insight</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('moves')}
+              className={`flex-1 py-2 px-2 text-center rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'moves'
+                  ? 'bg-slate-800 text-emerald-400 font-bold shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <ListFilter className="h-3.5 w-3.5" />
+              <span>Moves</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('report')}
+              className={`flex-1 py-2 px-2 text-center rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'report'
+                  ? 'bg-slate-800 text-emerald-400 font-bold shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <BarChart2 className="h-3.5 w-3.5" />
+              <span>Report</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('opening')}
+              className={`flex-1 py-2 px-2 text-center rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'opening'
+                  ? 'bg-slate-800 text-emerald-400 font-bold shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <BookOpen className="h-3.5 w-3.5" />
+              <span>Theory</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('drills')}
+              className={`flex-1 py-2 px-2 text-center rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'drills'
+                  ? 'bg-slate-800 text-rose-400 font-bold shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Target className="h-3.5 w-3.5" />
+              <span>Drills</span>
+            </button>
           </div>
 
-          {/* Accuracy Card */}
-          {analysisResult && (
-            <div className={mobileTab === 'moves' ? 'hidden lg:block' : ''}>
-              <AccuracyCard
-                result={analysisResult}
-                whitePlayer={activeGame.white}
-                blackPlayer={activeGame.black}
-              />
-            </div>
-          )}
+          {/* Tab Content Panes (Internal scrolling only, zero page scrolling) */}
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
+            {/* TAB 1: INSIGHT (Move commentary & tactical lesson) */}
+            {activeTab === 'insight' && (
+              <div className="space-y-4">
+                <ReviewSummary game={activeGame} activeMove={activeMove} />
 
-          {/* Move List with Classification Filters */}
-          {analysisResult ? (
-            <div className={`h-[420px] ${mobileTab === 'coach' ? 'hidden lg:block' : ''}`}>
-              <MoveList
-                moves={analysisResult.moves}
-                currentPly={currentPly}
-                onSelectPly={(ply) => {
-                  setCurrentPly(ply);
-                  if (mobileTab === 'moves') setMobileTab('board');
-                }}
-              />
-            </div>
-          ) : (
-            <div className="p-8 rounded-xl bg-slate-900 border border-slate-800 text-center space-y-3">
-              <p className="text-sm font-semibold text-slate-300">
-                This game has not been analyzed yet.
-              </p>
-              <p className="text-xs text-slate-400">
-                Run local Stockfish WASM to generate accurate evaluations, best moves, and player accuracy.
-              </p>
-              <button
-                onClick={async () => {
-                  if (!activeGame) return;
-                  const settings = await storageService.getSettings();
-                  const session = await sessionManager.createSession(
-                    [activeGame],
-                    settings,
-                    `Review: ${activeGame.white} vs ${activeGame.black}`
-                  );
-                  sessionManager.startSession(session.id);
-                  navigate(`/analysis/session/${encodeURIComponent(session.id)}`);
-                }}
-                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
-              >
-                Analyse Game with Stockfish
-              </button>
-            </div>
-          )}
+                {/* Mobile Advantage Graph when Insight tab is open */}
+                {analysisResult && (
+                  <div className="w-full sm:hidden">
+                    <AnalysisGraph
+                      moves={analysisResult.moves}
+                      currentPly={currentPly}
+                      onSelectPly={(ply) => setCurrentPly(ply)}
+                    />
+                  </div>
+                )}
 
-          {/* Mobile Training & Coaching Callout view */}
-          {mobileTab === 'coach' && improvementPlan && (
-            <div className="space-y-4 lg:hidden">
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Target className="h-4 w-4 text-rose-400" />
-                  <span>Mistake Replay Drills</span>
-                </h3>
-                <p className="text-xs text-slate-300">
-                  {improvementPlan.practicePositions.length} critical positions where significant mistakes were made.
-                </p>
-                <button
-                  onClick={() => setIsMistakeTrainerOpen(true)}
-                  className="w-full py-2.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition-colors cursor-pointer"
-                >
-                  Start Mistake Drill
-                </button>
-              </div>
-
-              {openingAnalysis && (
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    <BookOpen className="h-4 w-4 text-emerald-400" />
-                    <span>Opening Theory Replay</span>
-                  </h3>
-                  <p className="text-xs text-slate-300">
-                    {openingAnalysis.opening.name} ({openingAnalysis.opening.eco})
-                  </p>
+                {/* Quick actions row */}
+                <div className="flex items-center justify-between text-xs pt-1">
                   <button
-                    onClick={() => setIsOpeningCoachOpen(true)}
-                    className="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-colors cursor-pointer"
+                    onClick={() => setActiveTab('moves')}
+                    className="text-emerald-400 hover:underline flex items-center gap-1"
                   >
-                    Open Opening Coach
+                    <span>View all moves</span>
+                    <ChevronRight className="h-3 w-3" />
                   </button>
+                  <Link
+                    to={`/report?gameId=${encodeURIComponent(activeGame.id)}`}
+                    className="text-slate-400 hover:text-white flex items-center gap-1"
+                  >
+                    <span>Full game report</span>
+                    <ExternalLink className="h-3 w-3" />
+                  </Link>
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            )}
+
+            {/* TAB 2: MOVES LIST */}
+            {activeTab === 'moves' && (
+              <div className="h-full min-h-[320px]">
+                {analysisResult ? (
+                  <MoveList
+                    moves={analysisResult.moves}
+                    currentPly={currentPly}
+                    onSelectPly={(ply) => setCurrentPly(ply)}
+                  />
+                ) : (
+                  <p className="text-xs text-slate-400 text-center py-10">
+                    Run Stockfish analysis to view detailed move classifications and evaluations.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* TAB 3: REPORT & ACCURACY */}
+            {activeTab === 'report' && (
+              <div className="space-y-4">
+                {analysisResult ? (
+                  <>
+                    <AccuracyCard
+                      result={analysisResult}
+                      whitePlayer={activeGame.white}
+                      blackPlayer={activeGame.black}
+                    />
+
+                    <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-xs">
+                      <span className="text-slate-400">Want a full printable breakdown?</span>
+                      <Link
+                        to={`/report?gameId=${encodeURIComponent(activeGame.id)}`}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition-colors inline-flex items-center gap-1"
+                      >
+                        <span>Open Report Page</span>
+                        <ChevronRight className="h-3 w-3" />
+                      </Link>
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-center py-8 space-y-3">
+                    <p className="text-xs text-slate-400">Analysis pending for this game.</p>
+                    <button
+                      onClick={async () => {
+                        const settings = await storageService.getSettings();
+                        const session = await sessionManager.createSession(
+                          [activeGame],
+                          settings,
+                          `Review: ${activeGame.white} vs ${activeGame.black}`
+                        );
+                        sessionManager.startSession(session.id);
+                        navigate(`/analysis/session/${encodeURIComponent(session.id)}`);
+                      }}
+                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors"
+                    >
+                      Analyse with Stockfish WASM
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 4: OPENING THEORY */}
+            {activeTab === 'opening' && (
+              <div className="space-y-3.5">
+                {openingAnalysis ? (
+                  <>
+                    <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                          ECO {openingAnalysis.opening.eco}
+                        </span>
+                        <span className="text-[11px] font-mono text-slate-500">
+                          {openingAnalysis.matchedPlies} book plies
+                        </span>
+                      </div>
+                      <h3 className="text-sm font-bold text-white mt-1">
+                        {openingAnalysis.opening.name}
+                      </h3>
+                      <p className="text-xs font-mono text-slate-400 mt-1 truncate">
+                        {openingAnalysis.opening.moves}
+                      </p>
+                    </div>
+
+                    {openingAnalysis.deviation ? (
+                      <div className="bg-amber-950/20 border border-amber-500/30 p-3 rounded-xl text-xs space-y-1">
+                        <span className="font-bold text-amber-300 block">Out of Book Deviation:</span>
+                        <p className="text-slate-300">
+                          At ply {openingAnalysis.deviation.ply}, <strong className="text-white">{openingAnalysis.deviation.playedMove}</strong> was played. Mainline book theory recommends <strong className="text-emerald-400">{openingAnalysis.deviation.theoreticalMove}</strong>.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="bg-emerald-950/20 border border-emerald-500/30 p-3 rounded-xl text-xs text-emerald-300">
+                        Game moves fully conformed with established opening book theory!
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between pt-1">
+                      <button
+                        onClick={() => setIsOpeningCoachOpen(true)}
+                        className="py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors cursor-pointer"
+                      >
+                        Replay Opening Line
+                      </button>
+                      <Link
+                        to="/openings"
+                        className="text-xs text-slate-400 hover:text-white flex items-center gap-1"
+                      >
+                        <span>Browse 3,865 openings</span>
+                        <ChevronRight className="h-3 w-3" />
+                      </Link>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-xs text-slate-400 text-center py-8">
+                    No verified opening recognized for this move sequence.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* TAB 5: DRILLS & MISTAKE PRACTICE */}
+            {activeTab === 'drills' && (
+              <div className="space-y-3.5">
+                {improvementPlan && improvementPlan.practicePositions.length > 0 ? (
+                  <>
+                    <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-rose-400">Game Mistake Replay</span>
+                        <span className="text-xs font-mono text-slate-400">
+                          {improvementPlan.practicePositions.length} positions
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-300">
+                        Practice critical moments where blunders or mistakes occurred to train tactical intuition.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => setIsMistakeTrainerOpen(true)}
+                        className="py-2.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
+                      >
+                        <Target className="h-3.5 w-3.5" />
+                        <span>Interactive Replay</span>
+                      </button>
+
+                      <Link
+                        to={`/drills?gameId=${encodeURIComponent(activeGame.id)}`}
+                        className="py-2.5 px-3 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white font-bold text-xs transition-colors flex items-center justify-center gap-1.5"
+                      >
+                        <Award className="h-3.5 w-3.5 text-amber-400" />
+                        <span>Drills Page</span>
+                      </Link>
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-center py-8 space-y-2">
+                    <p className="text-xs text-slate-300 font-bold">No blunders recorded in this game!</p>
+                    <p className="text-xs text-slate-400">You played solidly throughout.</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

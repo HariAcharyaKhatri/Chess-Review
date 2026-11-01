@@ -254,6 +254,14 @@ class StorageService {
     };
   }
 
+  async clearAllGames(): Promise<void> {
+    const db = await this.getDB();
+    const tx = db.transaction(['games', 'analysisResults'], 'readwrite');
+    await tx.objectStore('games').clear();
+    await tx.objectStore('analysisResults').clear();
+    await tx.done;
+  }
+
   async clearAllData(): Promise<void> {
     const db = await this.getDB();
     const tx = db.transaction(['games', 'analysisResults', 'playerProfiles', 'sessions', 'benchmarks'], 'readwrite');

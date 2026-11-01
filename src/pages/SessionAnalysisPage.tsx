@@ -86,24 +86,24 @@ export const SessionAnalysisPage: React.FC = () => {
   const telemetry = session.telemetry;
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6">
       {/* Session Header */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-wrap items-center justify-between gap-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate('/analysis')}
-            className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-400 hover:text-white transition-colors"
+            className="p-2 sm:p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
             title="Return to setup"
           >
-            <ArrowLeft className="h-5 w-5" />
+            <ArrowLeft className="h-4 sm:h-5 w-4 sm:w-5" />
           </button>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-xl sm:text-2xl font-extrabold text-white">
+              <h1 className="text-lg sm:text-2xl font-extrabold text-white">
                 {session.title}
               </h1>
               <span
-                className={`text-xs px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                className={`text-[10px] sm:text-xs px-2 sm:px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider ${
                   session.status === 'running'
                     ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 animate-pulse'
                     : session.status === 'paused'
@@ -118,7 +118,7 @@ export const SessionAnalysisPage: React.FC = () => {
                 {session.status}
               </span>
             </div>
-            <p className="text-xs text-slate-400 mt-1">
+            <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5 sm:mt-1">
               Platform: <strong className="text-slate-200 capitalize">{session.platform}</strong> • Target Depth: <strong className="text-emerald-400 font-mono">{session.settings.depth}</strong> • Games: {completedCount}/{totalGames}
             </p>
           </div>
@@ -211,17 +211,27 @@ export const SessionAnalysisPage: React.FC = () => {
               </p>
             </div>
           </div>
-          <Link
-            to={
-              session.games.length === 1
-                ? `/review?gameId=${encodeURIComponent(session.games[0].id)}&sessionId=${encodeURIComponent(session.id)}`
-                : `/review?sessionId=${encodeURIComponent(session.id)}`
-            }
-            className="shrink-0 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg shadow-emerald-900/40 transition-colors inline-flex items-center gap-2"
-          >
-            <Eye className="h-4 w-4" />
-            <span>{session.games.length === 1 ? 'Open Game Review' : 'Open First Game Review'}</span>
-          </Link>
+          <div className="flex items-center gap-2 flex-wrap">
+            {session.games.length === 1 && (
+              <Link
+                to={`/report?gameId=${encodeURIComponent(session.games[0].id)}`}
+                className="shrink-0 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold text-xs transition-colors inline-flex items-center gap-2"
+              >
+                <span>Full Report</span>
+              </Link>
+            )}
+            <Link
+              to={
+                session.games.length === 1
+                  ? `/review?gameId=${encodeURIComponent(session.games[0].id)}&sessionId=${encodeURIComponent(session.id)}`
+                  : `/review?sessionId=${encodeURIComponent(session.id)}`
+              }
+              className="shrink-0 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg shadow-emerald-900/40 transition-colors inline-flex items-center gap-2"
+            >
+              <Eye className="h-4 w-4" />
+              <span>{session.games.length === 1 ? 'Open Game Review' : 'Open First Game Review'}</span>
+            </Link>
+          </div>
         </div>
       )}
 

@@ -1,19 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import {
   Search,
   Upload,
-  Cpu,
-  BarChart2,
-  Scale,
   ArrowRight,
   Sparkles,
+  Swords,
+  Target,
+  BookOpen,
+  Award,
 } from 'lucide-react';
 import { ChessComImporter } from '../services/chessComImporter';
 import { LichessImporter } from '../services/lichessImporter';
 import { PgnParser } from '../chess/pgnParser';
 import { storageService } from '../storage/indexedDb';
-import { sessionManager } from '../analysis/sessionManager';
 import { GameMetadata } from '../types/chess';
 
 export const HomePage: React.FC = () => {
@@ -44,7 +44,7 @@ export const HomePage: React.FC = () => {
           throw new Error(`No recent games found for Chess.com user "${username}".`);
         }
         await storageService.saveGames(games);
-        navigate(`/analysis?username=${encodeURIComponent(username)}&platform=chesscom`);
+        navigate(`/import`);
       } else if (platform === 'lichess') {
         if (!username.trim()) throw new Error('Please enter a Lichess username');
         const games = await LichessImporter.fetchGames(username, 30);
@@ -52,7 +52,7 @@ export const HomePage: React.FC = () => {
           throw new Error(`No games found for Lichess user "${username}".`);
         }
         await storageService.saveGames(games);
-        navigate(`/analysis?username=${encodeURIComponent(username)}&platform=lichess`);
+        navigate(`/import`);
       } else {
         if (!pgnInput.trim()) throw new Error('Please paste valid PGN text');
         const parsedGames = PgnParser.parseMultiPgn(pgnInput);
@@ -63,16 +63,9 @@ export const HomePage: React.FC = () => {
         await storageService.saveGames(games);
 
         if (games.length === 1) {
-          const settings = await storageService.getSettings();
-          const session = await sessionManager.createSession(
-            games,
-            settings,
-            `Review: ${games[0].white} vs ${games[0].black}`
-          );
-          sessionManager.startSession(session.id);
-          navigate(`/analysis/session/${encodeURIComponent(session.id)}`);
+          navigate(`/review?gameId=${encodeURIComponent(games[0].id)}`);
         } else {
-          navigate('/analysis?platform=pgn_upload');
+          navigate('/import');
         }
       }
     } catch (err: any) {
@@ -97,19 +90,7 @@ export const HomePage: React.FC = () => {
         }
         const games = parsed.map((p) => p.metadata);
         await storageService.saveGames(games);
-
-        if (games.length === 1) {
-          const settings = await storageService.getSettings();
-          const session = await sessionManager.createSession(
-            games,
-            settings,
-            `Review: ${games[0].white} vs ${games[0].black}`
-          );
-          sessionManager.startSession(session.id);
-          navigate(`/analysis/session/${encodeURIComponent(session.id)}`);
-        } else {
-          navigate('/analysis?platform=pgn_upload');
-        }
+        navigate('/import');
       } catch (err: any) {
         setError('Failed to read PGN file: ' + err.message);
       }
@@ -117,122 +98,142 @@ export const HomePage: React.FC = () => {
     reader.readAsText(file);
   };
 
+  const quickNavCards = [
+    {
+      title: 'Game Review',
+      desc: 'Interactive board review with real-time Stockfish evaluations & move classifications.',
+      icon: Swords,
+      color: 'from-emerald-500/20 to-teal-500/10 text-emerald-400 border-emerald-500/30',
+      to: '/review',
+    },
+    {
+      title: 'Mistake Drills',
+      desc: 'Replay and solve critical blunders and missed wins from your actual games.',
+      icon: Target,
+      color: 'from-rose-500/20 to-orange-500/10 text-rose-400 border-rose-500/30',
+      to: '/drills',
+    },
+    {
+      title: 'Opening Theory',
+      desc: 'Explore 3,865 ECO openings, theoretical continuations, and repertoire deviations.',
+      icon: BookOpen,
+      color: 'from-blue-500/20 to-cyan-500/10 text-blue-400 border-blue-500/30',
+      to: '/openings',
+    },
+    {
+      title: 'Game Reports',
+      desc: 'Printable game scorecards with ACPL, accuracy curves, and performance stats.',
+      icon: Award,
+      color: 'from-amber-500/20 to-yellow-500/10 text-amber-400 border-amber-500/30',
+      to: '/report',
+    },
+  ];
+
   return (
-    <div className="space-y-16 pb-16">
+    <div className="space-y-12 sm:space-y-16 pb-16">
       {/* Hero Section */}
-      <section className="relative overflow-hidden pt-12 sm:pt-20 text-center">
+      <section className="relative overflow-hidden pt-8 sm:pt-16 text-center">
         <div className="mx-auto max-w-4xl px-4 sm:px-6">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold mb-6">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold mb-4 sm:mb-6">
             <Sparkles className="h-3.5 w-3.5" />
-            <span>Real Local Stockfish WASM • 100% Free &amp; Private</span>
+            <span>Local Stockfish WASM • 100% Free &amp; Private • No Page Scrolling</span>
           </div>
 
-          <h1 className="text-4xl sm:text-6xl font-extrabold tracking-tight text-white leading-tight">
+          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-white leading-tight">
             Review Your Chess Games with{' '}
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-200">
               True Engine Power
             </span>
           </h1>
 
-          <p className="mt-5 text-base sm:text-lg text-slate-400 max-w-2xl mx-auto leading-relaxed">
-            Import games from Chess.com or Lichess. Run high-depth Stockfish analysis directly in your browser. Get move classifications, tactical explanations, and track your career progression.
+          <p className="mt-4 sm:mt-5 text-sm sm:text-base lg:text-lg text-slate-400 max-w-2xl mx-auto leading-relaxed">
+            Import games from Chess.com or Lichess. Run high-depth Stockfish analysis directly in your browser. Get move classifications, tactical explanations, and track your career progression across PC, tablet, and mobile.
           </p>
 
-          {/* Import Card */}
-          <div className="mt-10 mx-auto max-w-2xl bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-2xl backdrop-blur-sm">
-            {/* Platform Selector Tabs */}
-            <div className="flex rounded-xl bg-slate-950 p-1 mb-6 border border-slate-800">
+          {/* Quick Import Box */}
+          <div className="mt-8 max-w-xl mx-auto bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-2xl backdrop-blur-md">
+            {/* Platform Selector */}
+            <div className="flex rounded-xl bg-slate-950 p-1 mb-4 border border-slate-800 text-xs font-semibold">
               <button
                 type="button"
-                onClick={() => { setPlatform('chesscom'); setError(null); }}
-                className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${
-                  platform === 'chesscom'
-                    ? 'bg-emerald-600 text-white shadow-md'
-                    : 'text-slate-400 hover:text-white'
+                onClick={() => setPlatform('chesscom')}
+                className={`flex-1 py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+                  platform === 'chesscom' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
                 }`}
               >
-                Chess.com
+                <span>Chess.com</span>
               </button>
               <button
                 type="button"
-                onClick={() => { setPlatform('lichess'); setError(null); }}
-                className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${
-                  platform === 'lichess'
-                    ? 'bg-emerald-600 text-white shadow-md'
-                    : 'text-slate-400 hover:text-white'
+                onClick={() => setPlatform('lichess')}
+                className={`flex-1 py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+                  platform === 'lichess' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
                 }`}
               >
-                Lichess
+                <span>Lichess</span>
               </button>
               <button
                 type="button"
-                onClick={() => { setPlatform('pgn'); setError(null); }}
-                className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${
-                  platform === 'pgn'
-                    ? 'bg-emerald-600 text-white shadow-md'
-                    : 'text-slate-400 hover:text-white'
+                onClick={() => setPlatform('pgn')}
+                className={`flex-1 py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+                  platform === 'pgn' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
                 }`}
               >
-                Upload / Paste PGN
+                <span>PGN Upload</span>
               </button>
             </div>
 
-            {/* Form */}
-            <form onSubmit={handleFetch} className="space-y-4">
+            {/* Input Form */}
+            <form onSubmit={handleFetch} className="space-y-3">
               {platform !== 'pgn' ? (
-                <div className="flex flex-col sm:flex-row gap-3">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <div className="relative flex-1">
-                    <Search className="absolute left-3.5 top-3.5 h-5 w-5 text-slate-500" />
+                    <Search className="h-4 w-4 text-slate-400 absolute left-3.5 top-3.5 pointer-events-none" />
                     <input
                       type="text"
-                      placeholder={platform === 'chesscom' ? 'e.g. MagnusCarlsen or Hikaru' : 'e.g. DrNykterstein'}
+                      placeholder={platform === 'chesscom' ? 'Enter Chess.com Username' : 'Enter Lichess Username'}
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
-                      className="w-full pl-11 pr-4 py-3 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-emerald-500 font-medium"
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-emerald-500 font-medium"
                     />
                   </div>
                   <button
                     type="submit"
                     disabled={isLoading}
-                    className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm shadow-lg shadow-emerald-600/20 disabled:opacity-50 transition-all active:scale-95"
+                    className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-lg shadow-emerald-900/40 transition-colors disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
                   >
-                    {isLoading ? 'Importing...' : 'Fetch Games'}
+                    <span>{isLoading ? 'Fetching...' : 'Get Games'}</span>
                     <ArrowRight className="h-4 w-4" />
                   </button>
                 </div>
               ) : (
                 <div className="space-y-3">
                   <textarea
-                    rows={4}
-                    placeholder="Paste one or more PGN games here..."
+                    rows={3}
+                    placeholder="Paste PGN here (e.g. 1. e4 e5 2. Nf3...)"
                     value={pgnInput}
                     onChange={(e) => setPgnInput(e.target.value)}
                     className="w-full p-3 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 placeholder-slate-500 text-xs font-mono focus:outline-none focus:border-emerald-500"
                   />
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-                    <label className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors">
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-2">
+                    <label className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-semibold transition-colors">
                       <Upload className="h-4 w-4 text-emerald-400" />
                       <span>Choose .pgn file</span>
-                      <input
-                        type="file"
-                        accept=".pgn"
-                        onChange={handleFileUpload}
-                        className="hidden"
-                      />
+                      <input type="file" accept=".pgn" onChange={handleFileUpload} className="hidden" />
                     </label>
                     <button
                       type="submit"
                       disabled={isLoading}
-                      className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors"
+                      className="w-full sm:w-auto px-6 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition-colors disabled:opacity-50"
                     >
-                      {isLoading ? 'Processing...' : 'Load PGN'}
+                      Parse PGN Games
                     </button>
                   </div>
                 </div>
               )}
 
               {error && (
-                <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs text-left">
+                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs text-left">
                   {error}
                 </div>
               )}
@@ -241,65 +242,62 @@ export const HomePage: React.FC = () => {
         </div>
       </section>
 
-      {/* Features Grid */}
+      {/* Dedicated Functional Pages Quick-Access Grid */}
       <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-12">
-          <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
-            Designed for Serious Chess Improvement
+        <div className="text-center mb-8">
+          <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+            Explore Dedicated Specialized Hubs
           </h2>
-          <p className="mt-2 text-sm text-slate-400">
-            Real evaluations computed on your hardware without server queues or paywalls.
+          <p className="mt-1 text-xs sm:text-sm text-slate-400">
+            Dedicated pages designed for fast navigation without endless scrolling.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors">
-            <div className="h-10 w-10 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center mb-4">
-              <Cpu className="h-5 w-5" />
-            </div>
-            <h3 className="text-base font-bold text-white mb-2">Browser Stockfish WASM</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Stockfish runs inside a dedicated Web Worker directly in your browser. No server installations, no subscriptions, and complete offline capability.
-            </p>
-          </div>
-
-          <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors">
-            <div className="h-10 w-10 rounded-xl bg-teal-500/10 text-teal-400 flex items-center justify-center mb-4">
-              <BarChart2 className="h-5 w-5" />
-            </div>
-            <h3 className="text-base font-bold text-white mb-2">Documented Accuracy Math</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Calculates move accuracy using a transparent win-probability transformation based on real centipawn swings rather than opaque estimates.
-            </p>
-          </div>
-
-          <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors">
-            <div className="h-10 w-10 rounded-xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center mb-4">
-              <Scale className="h-5 w-5" />
-            </div>
-            <h3 className="text-base font-bold text-white mb-2">Oldest vs. Recent Comparison</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Directly benchmark your first games against your latest games to measure blunder reduction, accuracy growth, and rating progression over time.
-            </p>
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {quickNavCards.map((card) => {
+            const Icon = card.icon;
+            return (
+              <Link
+                key={card.title}
+                to={card.to}
+                className="group p-5 rounded-2xl bg-slate-900 border border-slate-800 hover:border-slate-700 hover:bg-slate-800/60 transition-all flex flex-col justify-between shadow-md"
+              >
+                <div>
+                  <div className={`h-10 w-10 rounded-xl bg-gradient-to-tr ${card.color} border flex items-center justify-center mb-3 group-hover:scale-105 transition-transform`}>
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <h3 className="text-base font-bold text-white mb-1 group-hover:text-emerald-400 transition-colors">
+                    {card.title}
+                  </h3>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    {card.desc}
+                  </p>
+                </div>
+                <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs font-semibold text-emerald-400">
+                  <span>Open Hub</span>
+                  <ArrowRight className="h-3.5 w-3.5 group-hover:translate-x-1 transition-transform" />
+                </div>
+              </Link>
+            );
+          })}
         </div>
       </section>
 
-      {/* Recently Imported Games Preview */}
+      {/* Saved Local Games Preview */}
       {recentGames.length > 0 && (
         <section className="mx-auto max-w-4xl px-4 sm:px-6">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-3">
             <h3 className="text-base font-bold text-white">Saved Local Games</h3>
-            <button
-              onClick={() => navigate('/analysis')}
-              className="text-xs font-medium text-emerald-400 hover:underline inline-flex items-center gap-1"
+            <Link
+              to="/import"
+              className="text-xs font-semibold text-emerald-400 hover:underline inline-flex items-center gap-1"
             >
-              <span>View all in analysis</span>
+              <span>Manage all in Import Hub</span>
               <ArrowRight className="h-3.5 w-3.5" />
-            </button>
+            </Link>
           </div>
 
-          <div className="divide-y divide-slate-800 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+          <div className="divide-y divide-slate-800 bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-lg">
             {recentGames.map((game) => (
               <div
                 key={game.id}
@@ -307,14 +305,14 @@ export const HomePage: React.FC = () => {
                 className="p-3 sm:p-4 flex items-center justify-between hover:bg-slate-800/40 cursor-pointer transition-colors"
               >
                 <div>
-                  <div className="font-semibold text-sm text-slate-100">
+                  <div className="font-bold text-sm text-slate-100">
                     {game.white} vs {game.black}
                   </div>
                   <div className="text-xs text-slate-400 mt-0.5">
-                    {game.openingName || game.eco || 'Standard'} • {game.date} • {game.timeClass}
+                    {game.openingName || game.eco || 'Standard'} • {game.date}
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
                   <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300">
                     {game.result}
                   </span>
