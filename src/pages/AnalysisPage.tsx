@@ -1,26 +1,25 @@
 import React, { useState, useEffect } from 'react';
-import { useSearchParams, useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { GameMetadata, GameAnalysisResult, EngineSettings, AnalysisSession, BenchmarkResult } from '../types/chess';
 import { storageService, DEFAULT_SETTINGS } from '../storage/indexedDb';
 import { sessionManager } from '../analysis/sessionManager';
 import { engineClient } from '../engine/engineClient';
 import { DeviceMonitor } from '../services/deviceMonitor';
-import { ChessComImporter } from '../services/chessComImporter';
-import { LichessImporter } from '../services/lichessImporter';
-import { PgnParser } from '../chess/pgnParser';
 import { GameTable } from '../components/GameTable/GameTable';
 import {
   Play,
   Cpu,
   Layers,
   BarChart2,
-  Upload,
   Activity,
   History,
+  ChevronRight,
+  ChevronLeft,
+  Sliders,
+  Upload,
 } from 'lucide-react';
 
 export const AnalysisPage: React.FC = () => {
-  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
   const [games, setGames] = useState<GameMetadata[]>([]);
@@ -28,17 +27,14 @@ export const AnalysisPage: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [pastSessions, setPastSessions] = useState<AnalysisSession[]>([]);
 
-  // Form states
-  const [platform, setPlatform] = useState<'chesscom' | 'lichess' | 'pgn_upload'>('chesscom');
-  const [username, setUsername] = useState(searchParams.get('username') || '');
-  const [pgnInput, setPgnInput] = useState('');
-  const [isFetching, setIsFetching] = useState(false);
-  const [fetchError, setFetchError] = useState<string | null>(null);
+  // 3-Step Wizard: 1 = Select Games, 2 = Engine Budget, 3 = Launch & Monitor
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
 
   // Settings & Auto-config
   const [settings, setSettings] = useState<EngineSettings>(DEFAULT_SETTINGS);
   const [autoConfig, setAutoConfig] = useState(true);
   const [isStartingSession, setIsStartingSession] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
 
   // Benchmarking state
   const [isBenchmarking, setIsBenchmarking] = useState(false);
@@ -80,133 +76,59 @@ export const AnalysisPage: React.FC = () => {
     }
   };
 
-  const handleFetchGames = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setFetchError(null);
-    setIsFetching(true);
-
-    try {
-      let fetched: GameMetadata[] = [];
-      if (platform === 'chesscom') {
-        if (!username.trim()) throw new Error('Enter a Chess.com username');
-        fetched = await ChessComImporter.fetchGames(username, 6, 50);
-      } else if (platform === 'lichess') {
-        if (!username.trim()) throw new Error('Enter a Lichess username');
-        fetched = await LichessImporter.fetchGames(username, 50);
-      } else {
-        if (!pgnInput.trim()) throw new Error('Enter or paste PGN text');
-        const parsed = PgnParser.parseMultiPgn(pgnInput);
-        if (parsed.length === 0) throw new Error('No valid PGN games found.');
-        fetched = parsed.map((p) => p.metadata);
-      }
-
-      if (fetched.length === 0) {
-        throw new Error('No games found for this player.');
-      }
-
-      await storageService.saveGames(fetched);
-      const all = await storageService.getAllGames();
-      setGames(all);
-      setSelectedIds(new Set(fetched.slice(0, 20).map((g) => g.id)));
-    } catch (err: any) {
-      setFetchError(err.message || 'Failed to retrieve games');
-    } finally {
-      setIsFetching(false);
-    }
-  };
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const text = event.target?.result as string;
-        const parsed = PgnParser.parseMultiPgn(text);
-        if (parsed.length === 0) {
-          setFetchError('No valid games found in uploaded PGN file.');
-          return;
-        }
-        const newGames = parsed.map((p) => p.metadata);
-        await storageService.saveGames(newGames);
-        const all = await storageService.getAllGames();
-        setGames(all);
-        setSelectedIds(new Set(newGames.map((g) => g.id)));
-      } catch (err: any) {
-        setFetchError('Failed to read PGN file: ' + err.message);
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  const handleToggleSelect = (id: string) => {
+  const handleToggleSelect = (gameId: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(gameId)) {
+        next.delete(gameId);
+      } else {
+        next.add(gameId);
+      }
       return next;
     });
   };
 
-  const handleSelectPreset = (mode: string) => {
-    const sorted = [...games].sort(
-      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-    );
-
-    if (mode === 'clear') {
-      setSelectedIds(new Set());
-      return;
-    }
-    if (mode === 'all') {
+  const handleSelectPreset = (preset: string) => {
+    if (preset === 'all') {
       setSelectedIds(new Set(games.map((g) => g.id)));
-      return;
-    }
-
-    if (mode.startsWith('recent_')) {
-      const count = parseInt(mode.replace('recent_', ''), 10) || 10;
-      setSelectedIds(new Set(sorted.slice(0, count).map((g) => g.id)));
-    } else if (mode.startsWith('oldest_')) {
-      const count = parseInt(mode.replace('oldest_', ''), 10) || 25;
-      setSelectedIds(new Set(sorted.slice(-count).map((g) => g.id)));
-    } else if (mode.startsWith('compare_')) {
-      const count = parseInt(mode.replace('compare_', ''), 10) || 25;
-      const oldest = sorted.slice(-count);
-      const recent = sorted.slice(0, count);
-      setSelectedIds(new Set([...oldest, ...recent].map((g) => g.id)));
+    } else if (preset === 'first10') {
+      setSelectedIds(new Set(games.slice(0, 10).map((g) => g.id)));
+    } else if (preset === 'unreviewed') {
+      const unreviewed = games.filter((g) => !resultsMap.has(g.id)).map((g) => g.id);
+      setSelectedIds(new Set(unreviewed));
+    } else {
+      setSelectedIds(new Set());
     }
   };
 
   const handleStartAnalysis = async () => {
-    if (isStartingSession) return;
-    const selectedGames = games.filter((g) => selectedIds.has(g.id));
-    if (selectedGames.length === 0) return;
-
+    if (selectedIds.size === 0) return;
     setIsStartingSession(true);
+    setSessionError(null);
 
     try {
       await storageService.saveSettings(settings);
 
-      const title =
-        selectedGames.length === 1
-          ? `Review: ${selectedGames[0].white} vs ${selectedGames[0].black}`
-          : `Batch Analysis (${selectedGames.length} games)`;
+      const gamesToAnalyse = games.filter((g) => selectedIds.has(g.id));
+      if (gamesToAnalyse.length === 0) {
+        throw new Error('No valid games selected for analysis');
+      }
 
-      // Create session in SessionManager
+      const inferredPlayer = gamesToAnalyse[0]?.white || undefined;
+
       const session = await sessionManager.createSession(
-        selectedGames,
+        gamesToAnalyse,
         settings,
-        title,
-        username || undefined
+        gamesToAnalyse.length === 1
+          ? `Review: ${gamesToAnalyse[0].white} vs ${gamesToAnalyse[0].black}`
+          : `Batch Analysis (${gamesToAnalyse.length} Games)`,
+        inferredPlayer
       );
 
-      // Start the session
       sessionManager.startSession(session.id);
-
-      // Navigate to dedicated session page immediately
       navigate(`/analysis/session/${encodeURIComponent(session.id)}`);
     } catch (err: any) {
-      setFetchError(err.message || 'Failed to start analysis session');
+      setSessionError(err.message || 'Failed to start analysis session');
       setIsStartingSession(false);
     }
   };
@@ -235,11 +157,10 @@ export const AnalysisPage: React.FC = () => {
       sessionManager.startSession(session.id);
       navigate(`/analysis/session/${encodeURIComponent(session.id)}`);
     } catch (err: any) {
-      setFetchError(err.message || 'Failed to start single game analysis');
+      setSessionError(err.message || 'Failed to start single game analysis');
     }
   };
 
-  // Workload estimation calculations
   const selectedGames = games.filter((g) => selectedIds.has(g.id));
   const avgPlies =
     selectedGames.length > 0
@@ -256,330 +177,411 @@ export const AnalysisPage: React.FC = () => {
   );
 
   return (
-    <div className="space-y-8 pb-16 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
-      {/* Title */}
-      <div>
-        <h1 className="text-3xl font-extrabold text-white tracking-tight">Game Import &amp; Analysis Setup</h1>
-        <p className="text-sm text-slate-400 mt-1">
-          Select games from Chess.com, Lichess, or PGN, configure your Stockfish engine budget, and launch a dedicated review session.
-        </p>
-      </div>
-
-      {/* Grid: Import Panel, Engine Settings, & Workload Estimator */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
-        {/* Import Panel */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-md flex flex-col justify-between">
-          <div>
-            <h2 className="text-base font-bold text-white mb-3 flex items-center gap-2">
-              <Layers className="h-5 w-5 text-emerald-400" />
-              <span>Import Public Games</span>
-            </h2>
-
-            <div className="flex rounded-xl bg-slate-950 p-1 mb-4 border border-slate-800 text-xs font-semibold">
-              <button
-                type="button"
-                onClick={() => setPlatform('chesscom')}
-                className={`flex-1 py-1.5 rounded-lg transition-colors ${
-                  platform === 'chesscom' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Chess.com
-              </button>
-              <button
-                type="button"
-                onClick={() => setPlatform('lichess')}
-                className={`flex-1 py-1.5 rounded-lg transition-colors ${
-                  platform === 'lichess' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Lichess
-              </button>
-              <button
-                type="button"
-                onClick={() => setPlatform('pgn_upload')}
-                className={`flex-1 py-1.5 rounded-lg transition-colors ${
-                  platform === 'pgn_upload' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                PGN
-              </button>
-            </div>
-
-            <form onSubmit={handleFetchGames} className="space-y-3">
-              {platform !== 'pgn_upload' ? (
-                <input
-                  type="text"
-                  placeholder={platform === 'chesscom' ? 'Chess.com Username' : 'Lichess Username'}
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-emerald-500 font-medium"
-                />
-              ) : (
-                <div className="space-y-2">
-                  <textarea
-                    rows={3}
-                    placeholder="Paste PGN here..."
-                    value={pgnInput}
-                    onChange={(e) => setPgnInput(e.target.value)}
-                    className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 placeholder-slate-500 text-xs font-mono focus:outline-none focus:border-emerald-500"
-                  />
-                  <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-colors">
-                    <Upload className="h-3.5 w-3.5 text-emerald-400" />
-                    <span>Upload .pgn</span>
-                    <input type="file" accept=".pgn" onChange={handleFileUpload} className="hidden" />
-                  </label>
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={isFetching}
-                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-md transition-colors disabled:opacity-50"
-              >
-                {isFetching ? 'Fetching Games...' : 'Retrieve Games'}
-              </button>
-
-              {fetchError && (
-                <p className="text-xs text-rose-400 bg-rose-500/10 p-2.5 rounded-lg border border-rose-500/20">
-                  {fetchError}
-                </p>
-              )}
-            </form>
-          </div>
-
-          <div className="mt-4 pt-3 border-t border-slate-800/80 text-xs text-slate-500">
-            Total stored games: <strong className="text-slate-300 font-mono">{games.length}</strong>
-          </div>
-        </div>
-
-        {/* Engine Settings Panel */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-md flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-base font-bold text-white flex items-center gap-2">
-                <Cpu className="h-5 w-5 text-emerald-400" />
-                <span>Engine Search Budget</span>
-              </h2>
-              <label className="flex items-center gap-1.5 cursor-pointer text-xs text-slate-400">
-                <input
-                  type="checkbox"
-                  checked={autoConfig}
-                  onChange={(e) => setAutoConfig(e.target.checked)}
-                  className="rounded border-slate-700 text-emerald-500 focus:ring-emerald-500"
-                />
-                <span>Auto Config</span>
-              </label>
-            </div>
-
-            <div className="space-y-4 text-xs">
-              <div>
-                <label className="text-slate-400 font-semibold block mb-1.5">Depth Preset</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { id: 'fast', label: 'Fast (D10)', depth: 10, time: 800 },
-                    { id: 'balanced', label: 'Balanced (D12)', depth: 12, time: 1500 },
-                    { id: 'deep', label: 'Deep (D15)', depth: 15, time: 3000 },
-                  ].map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => {
-                        setAutoConfig(false);
-                        setSettings((prev) => ({
-                          ...prev,
-                          preset: p.id as any,
-                          depth: p.depth,
-                          movetimeMs: p.time,
-                        }));
-                      }}
-                      className={`p-2 rounded-xl border text-center transition-colors font-semibold ${
-                        settings.preset === p.id
-                          ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400'
-                          : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700'
-                      }`}
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="text-slate-400 font-semibold block mb-1.5">Session Time Limit</label>
-                <select
-                  value={settings.sessionTimeLimitMinutes}
-                  onChange={(e) =>
-                    setSettings((prev) => ({
-                      ...prev,
-                      sessionTimeLimitMinutes: parseInt(e.target.value, 10),
-                    }))
-                  }
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 text-xs focus:outline-none focus:border-emerald-500"
-                >
-                  <option value={3}>3 Minutes</option>
-                  <option value={5}>5 Minutes</option>
-                  <option value={10}>10 Minutes</option>
-                  <option value={15}>15 Minutes</option>
-                  <option value={0}>Unlimited</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4 pt-3 border-t border-slate-800/80 text-xs text-slate-500">
-            Engine: <strong className="text-emerald-400 font-mono">Stockfish WASM</strong> • Hash: 32 MB
-          </div>
-        </div>
-
-        {/* Honest Workload & RAM Estimator */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-md flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-base font-bold text-white flex items-center gap-2">
-                <BarChart2 className="h-5 w-5 text-emerald-400" />
-                <span>Workload &amp; Resource Estimator</span>
-              </h2>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1.5">
-                <div className="flex justify-between text-slate-400">
-                  <span>Selected Games:</span>
-                  <span className="font-mono font-bold text-slate-100">{selectedGames.length}</span>
-                </div>
-                <div className="flex justify-between text-slate-400">
-                  <span>Avg Plies per Game:</span>
-                  <span className="font-mono text-slate-100">~{avgPlies} plies</span>
-                </div>
-                <div className="flex justify-between text-slate-400">
-                  <span>Estimated Duration:</span>
-                  <span className="font-mono font-bold text-emerald-400">
-                    ~{Math.ceil(workloadEstimate.estimatedSeconds / 60)} min ({workloadEstimate.estimatedSeconds}s)
-                  </span>
-                </div>
-                <div className="flex justify-between text-slate-400">
-                  <span>Device Load:</span>
-                  <span
-                    className={`font-bold ${
-                      workloadEstimate.comfortLevel === 'Light'
-                        ? 'text-emerald-400'
-                        : workloadEstimate.comfortLevel === 'Moderate'
-                        ? 'text-amber-400'
-                        : 'text-rose-400'
-                    }`}
-                  >
-                    {workloadEstimate.comfortLevel}
-                  </span>
-                </div>
-              </div>
-
-              <div className="text-[11px] text-slate-500 leading-relaxed">
-                <strong>Estimation Confidence:</strong> {workloadEstimate.confidence}. {workloadEstimate.memoryNote}
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
-            <button
-              type="button"
-              onClick={handleRunBenchmark}
-              disabled={isBenchmarking}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors disabled:opacity-50"
-            >
-              <Activity className="h-3.5 w-3.5 text-emerald-400" />
-              <span>{isBenchmarking ? 'Running Benchmark...' : 'Run Device Benchmark'}</span>
-            </button>
-
-            {benchmarkResult && (
-              <span className="text-[11px] font-mono text-emerald-400">
-                {(benchmarkResult.measuredNps / 1000).toFixed(0)}k NPS
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Primary Action Button Bar */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-emerald-950/40 border border-slate-800 p-5 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-4">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      {/* Top Header */}
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
         <div>
-          <h3 className="text-base font-bold text-white">
-            Ready to Analyse {selectedGames.length} Game{selectedGames.length === 1 ? '' : 's'}
-          </h3>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Launching analysis opens a dedicated session page with real-time Stockfish telemetry and live accuracy calculation.
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight flex items-center gap-2">
+            <Cpu className="h-7 w-7 text-emerald-400" />
+            <span>Stockfish Analysis Launchpad</span>
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-400 mt-1">
+            Choose games from your library, fine-tune the engine budget, and initiate dedicated analysis.
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={handleStartAnalysis}
-          disabled={selectedIds.size === 0 || isStartingSession}
-          className="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-xl shadow-emerald-600/30 disabled:opacity-40 transition-all active:scale-95 cursor-pointer"
+        <Link
+          to="/import"
+          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-emerald-400 hover:text-emerald-300 text-xs font-bold transition-colors"
         >
-          <Play className="h-5 w-5" />
-          <span>{isStartingSession ? 'Creating Session...' : 'Start Analysis Session'}</span>
+          <Upload className="h-3.5 w-3.5" />
+          <span>Import More Games</span>
+        </Link>
+      </div>
+
+      {/* 3-Step Wizard Navigation Bar */}
+      <div className="grid grid-cols-3 gap-2 bg-slate-900 border border-slate-800 rounded-2xl p-1.5 text-xs font-bold shadow-md">
+        <button
+          onClick={() => setWizardStep(1)}
+          className={`py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            wizardStep === 1
+              ? 'bg-emerald-600 text-white shadow'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+          }`}
+        >
+          <span className="h-5 w-5 rounded-full bg-slate-950/60 flex items-center justify-center text-[11px] font-mono">1</span>
+          <span className="hidden sm:inline">Select Games</span>
+          <span className="text-[11px] font-mono opacity-80">({selectedIds.size})</span>
+        </button>
+
+        <button
+          onClick={() => setWizardStep(2)}
+          className={`py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            wizardStep === 2
+              ? 'bg-emerald-600 text-white shadow'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+          }`}
+        >
+          <span className="h-5 w-5 rounded-full bg-slate-950/60 flex items-center justify-center text-[11px] font-mono">2</span>
+          <span className="hidden sm:inline">Engine Budget</span>
+          <span className="text-[11px] font-mono opacity-80">(D{settings.depth})</span>
+        </button>
+
+        <button
+          onClick={() => setWizardStep(3)}
+          className={`py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            wizardStep === 3
+              ? 'bg-emerald-600 text-white shadow'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+          }`}
+        >
+          <span className="h-5 w-5 rounded-full bg-slate-950/60 flex items-center justify-center text-[11px] font-mono">3</span>
+          <span className="hidden sm:inline">Review &amp; Launch</span>
         </button>
       </div>
 
-      {/* Past Sessions Drawer/List */}
-      {pastSessions.length > 0 && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-md">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <History className="h-4 w-4 text-emerald-400" />
-              <span>Recent Analysis Sessions</span>
-            </h3>
-            <span className="text-xs text-slate-500">{pastSessions.length} saved sessions</span>
+      {/* STEP 1: GAME SELECTION */}
+      {wizardStep === 1 && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/80 border border-slate-800 rounded-xl p-3">
+            <div>
+              <h2 className="text-sm font-bold text-white">Select Games to Evaluate</h2>
+              <p className="text-xs text-slate-400">
+                {games.length} games available. {selectedIds.size} currently checked.
+              </p>
+            </div>
+
+            <button
+              onClick={() => setWizardStep(2)}
+              disabled={selectedIds.size === 0}
+              className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition-colors disabled:opacity-40 flex items-center gap-1.5 cursor-pointer"
+            >
+              <span>Next: Engine Budget</span>
+              <ChevronRight className="h-4 w-4" />
+            </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {pastSessions.slice(0, 3).map((s) => (
+          {games.length > 0 ? (
+            <GameTable
+              games={games}
+              resultsMap={resultsMap}
+              selectedGameIds={selectedIds}
+              onToggleSelect={handleToggleSelect}
+              onSelectPreset={handleSelectPreset}
+              onAnalyseGame={handleAnalyseSingleGame}
+            />
+          ) : (
+            <div className="p-16 rounded-2xl bg-slate-900 border border-slate-800 text-center space-y-3">
+              <Layers className="h-10 w-10 mx-auto text-slate-600" />
+              <h3 className="text-base font-bold text-white">No Games in Library Yet</h3>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                Import your recent matches from Chess.com, Lichess, or upload PGN files to start reviewing.
+              </p>
               <Link
-                key={s.id}
-                to={`/analysis/session/${encodeURIComponent(s.id)}`}
-                className="bg-slate-950 p-3 rounded-xl border border-slate-800 hover:border-emerald-500/40 transition-colors flex items-center justify-between text-xs"
+                to="/import"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-colors"
               >
+                <Upload className="h-4 w-4" />
+                <span>Go to Game Import</span>
+              </Link>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* STEP 2: ENGINE BUDGET CONFIGURATION */}
+      {wizardStep === 2 && (
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+            {/* Presets & Depth */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Sliders className="h-5 w-5 text-emerald-400" />
+                  <span>Stockfish Depth Preset</span>
+                </h3>
+                <label className="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoConfig}
+                    onChange={(e) => setAutoConfig(e.target.checked)}
+                    className="rounded border-slate-700 text-emerald-500 focus:ring-emerald-500"
+                  />
+                  <span>Device Auto-Tune</span>
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                {[
+                  { id: 'fast', label: 'Fast', depth: 10, time: 800, desc: 'Quick blunders' },
+                  { id: 'balanced', label: 'Balanced', depth: 12, time: 1500, desc: 'Standard review' },
+                  { id: 'deep', label: 'Deep', depth: 15, time: 3000, desc: 'Deep tactics' },
+                  { id: 'master', label: 'Master', depth: 18, time: 5000, desc: 'Top precision' },
+                ].map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => {
+                      setAutoConfig(false);
+                      setSettings((prev) => ({
+                        ...prev,
+                        preset: p.id as any,
+                        depth: p.depth,
+                        movetimeMs: p.time,
+                      }));
+                    }}
+                    className={`p-3 rounded-xl border text-center transition-all cursor-pointer ${
+                      settings.preset === p.id
+                        ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400 shadow-sm'
+                        : 'bg-slate-950/70 border-slate-800 text-slate-300 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="font-bold text-sm">{p.label}</div>
+                    <div className="text-[11px] font-mono text-slate-400">Depth {p.depth}</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">{p.desc}</div>
+                  </button>
+                ))}
+              </div>
+
+              <div className="space-y-3 pt-2">
                 <div>
-                  <div className="font-bold text-slate-200 truncate max-w-[180px]">{s.title}</div>
-                  <div className="text-slate-500 text-[11px] mt-0.5">
-                    {s.completedGameIds.length}/{s.games.length} completed • Depth {s.settings.depth}
+                  <div className="flex justify-between text-xs text-slate-300 font-semibold mb-1">
+                    <span>Fine-tune Depth:</span>
+                    <span className="font-mono text-emerald-400">Depth {settings.depth}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={8}
+                    max={20}
+                    value={settings.depth}
+                    onChange={(e) => {
+                      setAutoConfig(false);
+                      setSettings((prev) => ({ ...prev, depth: parseInt(e.target.value, 10), preset: 'custom' as any }));
+                    }}
+                    className="w-full accent-emerald-500 cursor-pointer"
+                  />
+                  <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+                    <span>8 (Fastest)</span>
+                    <span>14 (Standard)</span>
+                    <span>20 (Deepest)</span>
                   </div>
                 </div>
-                <span
-                  className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                    s.status === 'completed'
-                      ? 'bg-teal-500/20 text-teal-300'
-                      : s.status === 'running'
-                      ? 'bg-emerald-500/20 text-emerald-400'
-                      : 'bg-slate-800 text-slate-400'
-                  }`}
+
+                <div>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1">Session Maximum Duration</label>
+                  <select
+                    value={settings.sessionTimeLimitMinutes}
+                    onChange={(e) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        sessionTimeLimitMinutes: parseInt(e.target.value, 10),
+                      }))
+                    }
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 text-xs focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value={3}>3 Minutes (Short batch)</option>
+                    <option value={5}>5 Minutes</option>
+                    <option value={10}>10 Minutes (Recommended)</option>
+                    <option value={20}>20 Minutes</option>
+                    <option value={0}>Unlimited (Full completion)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Performance Capabilities */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+              <h3 className="text-base font-bold text-white border-b border-slate-800 pb-3 flex items-center gap-2">
+                <Activity className="h-5 w-5 text-emerald-400" />
+                <span>Device Stockfish Capability</span>
+              </h3>
+
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Stockfish WebAssembly executes locally on your device without transmitting chess games to third-party cloud servers.
+              </p>
+
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Engine Build:</span>
+                  <span className="font-mono text-emerald-400 font-bold">Stockfish 16+ WASM</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Worker Architecture:</span>
+                  <span className="font-mono text-slate-200">Dedicated Blob Web Worker</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Engine Hash Memory:</span>
+                  <span className="font-mono text-slate-200">32 MB Transposition Table</span>
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={handleRunBenchmark}
+                  disabled={isBenchmarking}
+                  className="px-4 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-semibold transition-colors disabled:opacity-50 flex items-center gap-2 cursor-pointer"
                 >
-                  {s.status}
-                </span>
-              </Link>
-            ))}
+                  <Activity className="h-4 w-4 text-emerald-400" />
+                  <span>{isBenchmarking ? 'Testing Speed...' : 'Run CPU Benchmark'}</span>
+                </button>
+
+                {benchmarkResult && (
+                  <span className="text-xs font-mono font-bold text-emerald-400">
+                    {(benchmarkResult.measuredNps / 1000).toFixed(0)}k Nodes/Sec
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Stepper Navigation Buttons */}
+          <div className="flex items-center justify-between pt-2">
+            <button
+              onClick={() => setWizardStep(1)}
+              className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 font-semibold text-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              <span>Back: Select Games</span>
+            </button>
+
+            <button
+              onClick={() => setWizardStep(3)}
+              className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <span>Next: Review &amp; Launch</span>
+              <ChevronRight className="h-4 w-4" />
+            </button>
           </div>
         </div>
       )}
 
-      {/* Game Selection Table */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-bold text-white">Select Games</h2>
-          <span className="text-xs text-slate-400">
-            Check the boxes to choose games for this session.
-          </span>
-        </div>
+      {/* STEP 3: REVIEW & LAUNCH */}
+      {wizardStep === 3 && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
+            {/* Workload Summary Box */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col justify-between space-y-4">
+              <div>
+                <h3 className="text-base font-bold text-white border-b border-slate-800 pb-3 flex items-center gap-2">
+                  <BarChart2 className="h-5 w-5 text-emerald-400" />
+                  <span>Session Workload Estimation</span>
+                </h3>
 
-        <GameTable
-          games={games}
-          resultsMap={resultsMap}
-          selectedGameIds={selectedIds}
-          onToggleSelect={handleToggleSelect}
-          onSelectPreset={handleSelectPreset}
-          onAnalyseGame={handleAnalyseSingleGame}
-        />
-      </div>
+                <div className="space-y-3 mt-4 text-xs">
+                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Games to Evaluate:</span>
+                      <strong className="text-white font-mono">{selectedGames.length} games</strong>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Stockfish Depth:</span>
+                      <strong className="text-emerald-400 font-mono">Depth {settings.depth}</strong>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Estimated Duration:</span>
+                      <strong className="text-emerald-400 font-mono">
+                        ~{Math.ceil(workloadEstimate.estimatedSeconds / 60)} min ({workloadEstimate.estimatedSeconds}s)
+                      </strong>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Device Load Comfort:</span>
+                      <strong className="text-slate-200">{workloadEstimate.comfortLevel}</strong>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Once launched, you will be taken to a dedicated analysis session page showing live Stockfish UCI output, nodes per second, and running accuracy averages.
+                  </p>
+                </div>
+              </div>
+
+              {sessionError && (
+                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">
+                  {sessionError}
+                </div>
+              )}
+            </div>
+
+            {/* Ready to Launch Card */}
+            <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/50 border border-emerald-500/30 rounded-2xl p-6 shadow-xl flex flex-col justify-between space-y-4">
+              <div>
+                <div className="h-12 w-12 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center mb-4">
+                  <Play className="h-6 w-6 ml-0.5" />
+                </div>
+                <h3 className="text-xl font-extrabold text-white">
+                  Ready to Launch Analysis
+                </h3>
+                <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                  Start analyzing {selectedGames.length} game{selectedGames.length === 1 ? '' : 's'} with local Stockfish WASM. You can pause, resume, or stop after any game at any time.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleStartAnalysis}
+                disabled={selectedIds.size === 0 || isStartingSession}
+                className="w-full py-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-sm shadow-xl shadow-emerald-900/40 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40"
+              >
+                <Play className="h-5 w-5" />
+                <span>{isStartingSession ? 'Initializing Stockfish...' : `Start Session (${selectedGames.length} Games)`}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Stepper Navigation Buttons */}
+          <div className="flex items-center justify-between pt-2">
+            <button
+              onClick={() => setWizardStep(2)}
+              className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 font-semibold text-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              <span>Back: Engine Budget</span>
+            </button>
+          </div>
+
+          {/* Recent Past Sessions */}
+          {pastSessions.length > 0 && (
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-md">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <History className="h-4 w-4 text-emerald-400" />
+                  <span>Recent Analysis Sessions</span>
+                </h3>
+                <span className="text-xs text-slate-500">{pastSessions.length} saved sessions</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {pastSessions.slice(0, 3).map((s) => (
+                  <Link
+                    key={s.id}
+                    to={`/analysis/session/${encodeURIComponent(s.id)}`}
+                    className="bg-slate-950 p-3 rounded-xl border border-slate-800 hover:border-emerald-500/40 transition-colors flex items-center justify-between text-xs"
+                  >
+                    <div>
+                      <div className="font-bold text-slate-200 truncate max-w-[180px]">{s.title}</div>
+                      <div className="text-slate-500 text-[11px] mt-0.5">
+                        {s.completedGameIds.length}/{s.games.length} completed • Depth {s.settings.depth}
+                      </div>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                        s.status === 'completed'
+                          ? 'bg-teal-500/20 text-teal-300'
+                          : s.status === 'running'
+                          ? 'bg-emerald-500/20 text-emerald-400'
+                          : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {s.status}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

@@ -4,6 +4,7 @@ import { GameMetadata } from '../types/chess';
 import { storageService } from '../storage/indexedDb';
 import { ChessBoard } from '../components/ChessBoard/ChessBoard';
 import { PositionService } from '../chess/positionService';
+import { soundService } from '../services/soundService';
 import { Square } from 'chess.js';
 import {
   Target,
@@ -144,6 +145,7 @@ export const DrillsPage: React.FC = () => {
         (bestSan && played.san.replace('+', '').replace('#', '') === bestSan.replace('+', '').replace('#', ''));
 
       if (isMatch) {
+        soundService.playSuccess();
         setFeedback({
           isCorrect: true,
           text: `Outstanding! ${played.san} is indeed the top engine continuation!`,
@@ -157,6 +159,7 @@ export const DrillsPage: React.FC = () => {
         const newFen = PositionService.applyMove(boardFen, played.san);
         if (newFen) setBoardFen(newFen);
       } else {
+        soundService.playMistake();
         setFeedback({
           isCorrect: false,
           text: `Not quite! You played ${played.san}, but the position requires a stronger tactical response. Try another move or use a hint!`,

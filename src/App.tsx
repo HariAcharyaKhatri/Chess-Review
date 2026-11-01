@@ -1,6 +1,7 @@
 import React from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Navbar } from './components/Navbar';
+import { MobileBottomNav } from './components/MobileBottomNav';
 import { HomePage } from './pages/HomePage';
 import { ImportPage } from './pages/ImportPage';
 import { AnalysisPage } from './pages/AnalysisPage';
@@ -19,7 +20,7 @@ export const App: React.FC = () => {
     <HashRouter>
       <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
         <Navbar />
-        <main className="flex-1">
+        <main className="flex-1 pb-16 md:pb-0">
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/import" element={<ImportPage />} />
@@ -38,7 +39,8 @@ export const App: React.FC = () => {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
-        <footer className="border-t border-slate-800/80 bg-slate-950 py-4 text-center text-xs text-slate-500">
+        <MobileBottomNav />
+        <footer className="border-t border-slate-800/80 bg-slate-950 py-4 text-center text-xs text-slate-500 hidden md:block">
           <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
             <span>Chess Player Analytics &amp; Review System</span>
             <span>Powered by Stockfish WASM • GPLv3 Compliant • 100% Client-Side</span>

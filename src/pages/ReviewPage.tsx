@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { GameMetadata, GameAnalysisResult, MoveAnalysis } from '../types/chess';
 import { storageService } from '../storage/indexedDb';
@@ -16,6 +16,7 @@ import { MistakeTrainerModal } from '../components/MistakeTrainer/MistakeTrainer
 import { ImprovementPlanModal } from '../components/ImprovementPlan/ImprovementPlanModal';
 import { analyzeOpening, OpeningAnalysisResult } from '../chess/openings';
 import { ImprovementService, PersonalizedImprovementPlan } from '../services/improvementService';
+import { soundService } from '../services/soundService';
 import {
   Download,
   FileJson,
@@ -168,6 +169,21 @@ export const ReviewPage: React.FC = () => {
       // keep starting position
     }
   }
+
+  // Audio feedback on move navigation
+  const prevPlyRef = useRef(currentPly);
+  useEffect(() => {
+    if (prevPlyRef.current !== currentPly) {
+      prevPlyRef.current = currentPly;
+      if (currentPly > 0 && activeMove) {
+        if (activeMove.san.includes('x')) {
+          soundService.playCapture();
+        } else {
+          soundService.playMove();
+        }
+      }
+    }
+  }, [currentPly, activeMove]);
 
   const handleExportPgn = () => {
     if (!activeGame) return;
